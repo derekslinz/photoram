@@ -18,5 +18,6 @@ src/photoram.egg-info/top_level.txt
 tests/test_cli.py
 tests/test_cli_integration.py
 tests/test_errors.py
+tests/test_model.py
 tests/test_schemas.py
 tests/test_utils.py

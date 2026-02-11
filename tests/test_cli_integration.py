@@ -137,9 +137,8 @@ class TestCLIOutputIntegration:
     def test_tag_requires_input_when_no_compat_image(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["tag"])
         assert result.exit_code == 2
-        # With mix_stderr=False, Click writes usage errors to stderr
-        combined = (result.output or "") + (result.stderr or "")
-        assert "Missing argument 'INPUT...'" in combined
+        # With mix_stderr=True, stderr is mixed into output
+        assert "Missing argument 'INPUT...'" in result.output
 
     @patch("photoram.cli.TaggingService")
     def test_timings_flag_prints_basic_timings(
@@ -154,10 +153,10 @@ class TestCLIOutputIntegration:
         result = runner.invoke(main, ["tag", str(sample_image), "-T", "--quiet"])
 
         assert result.exit_code == EXIT_SUCCESS
-        assert "Timings:" in result.stderr
-        assert "model load:" in result.stderr
-        assert "tagging:" in result.stderr
-        assert "total:" in result.stderr
+        assert "Timings:" in result.output
+        assert "model load:" in result.output
+        assert "tagging:" in result.output
+        assert "total:" in result.output
 
 
 class TestCLIMetadataIntegration:
