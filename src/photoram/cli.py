@@ -50,7 +50,7 @@ def main() -> None:
 
 @main.command()
 @click.argument("input_paths", nargs=-1, required=True, metavar="INPUT...")
-@click.option("-t", "--threshold", type=float, default=0.5, show_default=True,
+@click.option("-t", "--threshold", type=float, default=0.68, show_default=True,
               help="Detection threshold (0.0–1.0).")
 @click.option("-n", "--top-n", type=int, default=None,
               help="Maximum number of tags to return.")

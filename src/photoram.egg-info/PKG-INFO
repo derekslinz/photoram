@@ -1,0 +1,140 @@
+Metadata-Version: 2.4
+Name: photoram
+Version: 0.1.0
+Summary: Modern CLI photo tagger powered by RAM++ (Recognize Anything Model)
+Author: lderek
+License-Expression: MIT
+Keywords: image-tagging,photo,keywords,RAM++,deep-learning,cli
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Multimedia :: Graphics
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: torch>=2.0
+Requires-Dist: torchvision>=0.15
+Requires-Dist: Pillow>=9.0
+Requires-Dist: ram @ git+https://github.com/xinyu1205/recognize-anything.git
+Requires-Dist: huggingface-hub>=0.20
+Requires-Dist: rich>=13.0
+Requires-Dist: click>=8.0
+Requires-Dist: transformers<4.46,>=4.30
+Requires-Dist: timm
+Requires-Dist: scipy
+Requires-Dist: fairscale
+Provides-Extra: metadata
+Requires-Dist: pyexiv2>=2.8; extra == "metadata"
+Provides-Extra: all
+Requires-Dist: pyexiv2>=2.8; extra == "all"
+
+# photoram
+
+A modern CLI photo tagger powered by **RAM++** (Recognize Anything Model Plus Plus). Offline image tagging with state-of-the-art accuracy — a spiritual successor to [photils-cli](https://github.com/scheckmedia/photils-cli).
+
+## Features
+
+- **4,585+ tag vocabulary** — RAM++ recognizes thousands of common + open-set categories
+- **Fully offline** — no data leaves your machine
+- **Batch processing** — tag entire directories recursively
+- **Confidence scores** — see how confident the model is per tag
+- **EXIF/XMP/IPTC metadata writing** — embed tags directly into image files
+- **Tag translation/override** — customize tags via a simple JSON mapping
+- **Multiple output formats** — text, JSON, CSV
+- **GPU accelerated** — CUDA & Apple MPS support with automatic fallback to CPU
+- **Auto model download** — fetches the RAM++ checkpoint from HuggingFace on first run
+
+## Installation
+
+```bash
+# Basic install
+pip install -e .
+
+# With metadata writing support
+pip install -e ".[metadata]"
+```
+
+## Quick Start
+
+```bash
+# Tag a single image
+photoram tag photo.jpg
+
+# Tag with confidence scores
+photoram tag photo.jpg --confidence
+
+# Tag all images in a directory
+photoram tag ./photos/ --recursive
+
+# Write tags into image EXIF/XMP metadata
+photoram tag photo.jpg --write-metadata
+
+# Output as JSON
+photoram tag photo.jpg --format json
+
+# Adjust detection threshold (default: 0.5)
+photoram tag photo.jpg --threshold 0.6
+
+# Use tag overrides/translations
+photoram tag photo.jpg --overrides my_overrides.json
+```
+
+## Tag Translation
+
+Create an `override_labels.json` file to rename or translate tags:
+
+```json
+{
+    "blackbackground": "black background",
+    "art": "kunst",
+    "shadow": "schatten"
+}
+```
+
+Place it at `~/.config/photoram/override_labels.json` or pass it with `--overrides`.
+
+## CLI Reference
+
+```text
+photoram tag [OPTIONS] INPUT...
+
+Arguments:
+  INPUT         Image file(s) or directory to tag
+
+Options:
+  -t, --threshold FLOAT    Detection threshold 0.0-1.0 (default: 0.5)
+  -n, --top-n INTEGER      Maximum number of tags to return
+  -c, --confidence         Show confidence scores
+  -f, --format FORMAT      Output format: text, json, csv (default: text)
+  -o, --output FILE        Write results to file
+  -r, --recursive          Recursively scan directories
+  -w, --write-metadata     Write tags to image EXIF/XMP/IPTC metadata
+      --overrides FILE     Tag override/translation JSON file
+      --device DEVICE      Force device: cpu, cuda, mps (default: auto)
+      --image-size INT     Input image size (default: 384)
+      --chinese            Also output Chinese tags
+  -q, --quiet              Suppress progress output
+  -h, --help               Show this help message
+```
+
+## Supported Formats
+
+**Input:** JPEG, PNG, TIFF, BMP, WebP, HEIC (any format PIL can read)
+
+**Output:** Text (pipe-separated), JSON, CSV
+
+## How It Works
+
+photoram uses the [RAM++ (Recognize Anything Plus Plus)](https://github.com/xinyu1205/recognize-anything) model — a state-of-the-art vision transformer that was trained on millions of image-tag-text triplets. On first run, the model weights (~800MB) are automatically downloaded from HuggingFace.
+
+## darktable Integration
+
+photoram is designed as a drop-in replacement for photils-cli. To use with the [photils-dt](https://github.com/scheckmedia/photils-dt) darktable plugin, configure it to call:
+
+```bash
+photoram tag --image "$FILE"
+```
+
+## License
+
+MIT

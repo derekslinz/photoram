@@ -1,0 +1,2 @@
+[console_scripts]
+photoram = photoram.cli:main

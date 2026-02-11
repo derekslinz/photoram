@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import torch
-from huggingface_hub import hf_hub_download
-from PIL import Image
 
-# RAM++ imports
-from ram import get_transform
-from ram.models import ram_plus
+# Suppress timm deprecation warnings from the RAM package
+warnings.filterwarnings("ignore", category=FutureWarning, module="timm")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -24,7 +21,7 @@ HF_REPO_ID = "xinyu1205/recognize-anything-plus-model"
 HF_FILENAME = "ram_plus_swin_large_14m.pth"
 
 DEFAULT_IMAGE_SIZE = 384
-DEFAULT_THRESHOLD = 0.5
+DEFAULT_THRESHOLD = 0.68
 
 CACHE_DIR = Path(os.environ.get(
     "PHOTORAM_CACHE",
@@ -62,8 +59,13 @@ class RAMPlusModel:
     ) -> None:
         self.image_size = image_size
         self.threshold = threshold
-        self.device = self._resolve_device(device)
         self.pretrained_path = pretrained_path or str(self._ensure_checkpoint())
+
+        # Lazy-import heavy deps
+        import torch
+        from ram import get_transform
+
+        self.device = self._resolve_device(device)
         self.transform = get_transform(image_size=self.image_size)
 
         self._model: Optional[torch.nn.Module] = None
@@ -73,7 +75,9 @@ class RAMPlusModel:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_device(device: Optional[str]) -> torch.device:
+    def _resolve_device(device: Optional[str]) -> "torch.device":
+        import torch
+
         if device:
             return torch.device(device)
         if torch.cuda.is_available():
@@ -89,6 +93,8 @@ class RAMPlusModel:
     @staticmethod
     def _ensure_checkpoint() -> Path:
         """Download the RAM++ checkpoint from HuggingFace if not cached."""
+        from huggingface_hub import hf_hub_download
+
         dest = CACHE_DIR / HF_FILENAME
         if dest.exists():
             return dest
@@ -107,8 +113,10 @@ class RAMPlusModel:
     # ------------------------------------------------------------------
 
     @property
-    def model(self) -> torch.nn.Module:
+    def model(self) -> "torch.nn.Module":
         if self._model is None:
+            from ram.models import ram_plus
+
             self._model = ram_plus(
                 pretrained=self.pretrained_path,
                 image_size=self.image_size,
@@ -124,6 +132,9 @@ class RAMPlusModel:
 
     def tag_image(self, image_path: str | Path) -> TagResult:
         """Run RAM++ on a single image and return tags with confidences."""
+        import torch
+        from PIL import Image
+
         image = self.transform(Image.open(image_path)).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
@@ -137,9 +148,10 @@ class RAMPlusModel:
         )
 
     def _inference_with_confidence(
-        self, image: torch.Tensor
+        self, image: "torch.Tensor"
     ) -> tuple[list[str], list[str], list[float]]:
         """Custom inference that also returns per-tag confidence scores."""
+        import torch
         model = self.model
 
         image_embeds = model.image_proj(model.visual_encoder(image))
@@ -184,12 +196,13 @@ class RAMPlusModel:
         logits = model.fc(tagging_embed[0]).squeeze(-1)
         probs = torch.sigmoid(logits)
 
-        # Apply per-class thresholds
-        class_threshold = model.class_threshold.to(image.device)
-
-        # Override with our global threshold if different from default
-        if self.threshold != 0.68:
+        # Apply per-class thresholds from the model, or user override
+        if self.threshold != DEFAULT_THRESHOLD:
+            # User explicitly set a custom threshold — use it uniformly
             class_threshold = torch.ones(model.num_class, device=image.device) * self.threshold
+        else:
+            # Use the model's per-class calibrated thresholds
+            class_threshold = model.class_threshold.to(image.device)
 
         targets = (probs > class_threshold).float()
         tag_array = targets.cpu().numpy()
