@@ -157,15 +157,22 @@ Then restart darktable and run the selected-images action:
 
 - `photoram auto-tag`
 
+The plugin also registers a visible panel module:
+
+- Name: `photoram auto-tagger`
+- Location: right panel in lighttable (or left panel in darkroom)
+- Button: `auto-tag selected`
+
 Troubleshooting:
 
 1. Check darktable Lua logs for load errors:
 - Linux/macOS: start darktable from terminal and inspect stderr output.
-2. Confirm plugin is in the exact path:
+2. Ensure the panel is enabled in darktable module visibility settings.
+3. Confirm plugin is in the exact path:
 - `~/.config/darktable/lua/photoram.lua`
-3. Confirm `luarc` contains:
+4. Confirm `luarc` contains:
 - `require "photoram"`
-4. If `photoram-cli` is not on PATH, set preference:
+5. If `photoram-cli` is not on PATH, set preference:
 - `photoram: executable` to full binary path (for example `/usr/local/bin/photoram-cli`).
 
 ## Output Contract

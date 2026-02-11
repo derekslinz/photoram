@@ -144,10 +144,28 @@ local function execute_command(command)
   return 1
 end
 
+local UI = {
+  status = nil,
+}
+
+local STATE = {
+  action_registered = false,
+  shortcut_registered = false,
+  lib_registered = false,
+  view_event_registered = false,
+}
+
 local function run_photoram(images)
   images = resolve_images(images)
+  if UI.status then
+    UI.status.label = _("running...")
+  end
+
   if not images or #images == 0 then
     dt.print(_("photoram: no images selected"))
+    if UI.status then
+      UI.status.label = _("no images selected")
+    end
     return
   end
 
@@ -200,6 +218,13 @@ local function run_photoram(images)
     if stderr ~= "" then
       local first_line = stderr:match("([^\n]+)") or stderr
       dt.print_error(first_line)
+      if UI.status then
+        UI.status.label = first_line
+      end
+    else
+      if UI.status then
+        UI.status.label = _("command failed")
+      end
     end
     return
   end
@@ -240,24 +265,88 @@ local function run_photoram(images)
     #images,
     attached_tags
   ))
+  if UI.status then
+    UI.status.label = string.format(
+      _("tagged %d/%d images"),
+      tagged_images,
+      #images
+    )
+  end
 end
 
-local action_registered = false
-local shortcut_registered = false
+local function install_lib_module()
+  if STATE.lib_registered then
+    return
+  end
+
+  UI.status = dt.new_widget("label") {
+    label = _("ready"),
+  }
+
+  local run_btn = dt.new_widget("button") {
+    label = _("auto-tag selected"),
+    clicked_callback = function()
+      run_photoram(resolve_images(nil))
+    end,
+  }
+
+  local container = dt.new_widget("box") {
+    orientation = "vertical",
+    run_btn,
+    UI.status,
+  }
+
+  local plugin_display_views = {
+    [dt.gui.views.lighttable] = {"DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100},
+    [dt.gui.views.darkroom] = {"DT_UI_CONTAINER_PANEL_LEFT_CENTER", 100},
+  }
+
+  local ok, err = pcall(function()
+    dt.register_lib(
+      MODULE,
+      _("photoram auto-tagger"),
+      true,
+      false,
+      plugin_display_views,
+      container,
+      nil,
+      nil
+    )
+  end)
+
+  if ok then
+    STATE.lib_registered = true
+  else
+    dt.print_error(_("photoram: failed to register panel"))
+    dt.print_log("photoram panel registration error: " .. tostring(err))
+  end
+end
 
 local function destroy()
-  if action_registered then
+  if STATE.action_registered then
     pcall(function()
       dt.gui.libs.image.destroy_action(MODULE)
     end)
-    action_registered = false
+    STATE.action_registered = false
   end
 
-  if shortcut_registered then
+  if STATE.shortcut_registered then
     pcall(function()
       dt.destroy_event(MODULE, "shortcut")
     end)
-    shortcut_registered = false
+    STATE.shortcut_registered = false
+  end
+
+  if STATE.view_event_registered then
+    pcall(function()
+      dt.destroy_event(MODULE, "view-changed")
+    end)
+    STATE.view_event_registered = false
+  end
+
+  if STATE.lib_registered and dt.gui and dt.gui.libs and dt.gui.libs[MODULE] then
+    dt.gui.libs[MODULE].visible = false
+    STATE.lib_registered = false
   end
 end
 
@@ -270,7 +359,7 @@ local ok_action, err_action = pcall(function()
     end,
     _("Run photoram-cli on selected images and attach predicted tags")
   )
-  action_registered = true
+  STATE.action_registered = true
 end)
 if not ok_action then
   dt.print_error(_("photoram: failed to register image action"))
@@ -286,10 +375,42 @@ local ok_shortcut, err_shortcut = pcall(function()
     end,
     _("photoram auto-tag")
   )
-  shortcut_registered = true
+  STATE.shortcut_registered = true
 end)
 if not ok_shortcut then
   dt.print_log("photoram shortcut registration error: " .. tostring(err_shortcut))
+end
+
+local function install_or_schedule_panel()
+  if not (dt.gui and dt.gui.current_view) then
+    install_lib_module()
+    return
+  end
+
+  local current_view = dt.gui.current_view()
+  if current_view and current_view.id == "lighttable" then
+    install_lib_module()
+    return
+  end
+
+  local ok, err = pcall(function()
+    dt.register_event(
+      MODULE,
+      "view-changed",
+      function(event, old_view, new_view)
+        if new_view and new_view.name == "lighttable" then
+          install_lib_module()
+        end
+      end
+    )
+  end)
+
+  if ok then
+    STATE.view_event_registered = true
+  else
+    dt.print_log("photoram view-changed registration error: " .. tostring(err))
+    install_lib_module()
+  end
 end
 
 -- Preferences
@@ -342,6 +463,8 @@ safe_register_pref(
   false
 )
 
+install_or_schedule_panel()
+
 local script_data = {}
 script_data.metadata = {
   name = _("photoram"),
@@ -350,5 +473,6 @@ script_data.metadata = {
   help = "https://github.com/lderek/photoram",
 }
 script_data.destroy = destroy
+script_data.destroy_method = "hide"
 
 return script_data
