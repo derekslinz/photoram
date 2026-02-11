@@ -129,6 +129,34 @@ photoram-cli tag --image "$FILE"
 
 Prints package version, torch/runtime capability, resolved default device, and model cache information.
 
+## darktable Lua Plugin
+
+A multi-image darktable plugin is included at:
+
+- `darktable/photoram.lua`
+
+What it does:
+
+- Works on all selected images in one action (not single-image only).
+- Exposes tunable parameters in darktable preferences:
+- `photoram: max tags` -> `--top-n`
+- `photoram: threshold (%)` -> `--threshold`
+- `photoram: batch size` -> `--batch-size`
+- `photoram: write metadata` -> `--write-metadata`
+- `photoram: executable` -> command/path to `photoram-cli`
+
+Install:
+
+```bash
+mkdir -p ~/.config/darktable/lua
+cp darktable/photoram.lua ~/.config/darktable/lua/photoram.lua
+echo 'require "photoram"' >> ~/.config/darktable/luarc
+```
+
+Then restart darktable and run the selected-images action:
+
+- `photoram auto-tag`
+
 ## Output Contract
 
 ### JSON (`--format json`)
