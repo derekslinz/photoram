@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+from .errors import CheckpointCorruptionError, CheckpointDownloadError, ModelError
+from .schemas import TagResult
 
 # Suppress timm deprecation warnings from the RAM package
 warnings.filterwarnings("ignore", category=FutureWarning, module="timm")
@@ -23,24 +25,13 @@ HF_FILENAME = "ram_plus_swin_large_14m.pth"
 DEFAULT_IMAGE_SIZE = 384
 DEFAULT_THRESHOLD = 0.68
 
+# Minimum reasonable checkpoint size (100 MB) — guards against truncated downloads
+_MIN_CHECKPOINT_BYTES = 100 * 1024 * 1024
+
 CACHE_DIR = Path(os.environ.get(
     "PHOTORAM_CACHE",
     Path.home() / ".cache" / "photoram",
 ))
-
-
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
-
-@dataclass
-class TagResult:
-    """Result for a single image."""
-
-    path: str
-    tags: list[str]
-    tags_chinese: list[str]
-    confidences: list[float]
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +50,17 @@ class RAMPlusModel:
     ) -> None:
         self.image_size = image_size
         self.threshold = threshold
-        self.pretrained_path = pretrained_path or str(self._ensure_checkpoint())
+
+        try:
+            self.pretrained_path = pretrained_path or str(self._ensure_checkpoint())
+        except (CheckpointDownloadError, CheckpointCorruptionError):
+            raise
+        except Exception as e:
+            raise CheckpointDownloadError(
+                f"Unexpected error obtaining model checkpoint: {e}\n"
+                f"Try deleting the cache directory and retrying:\n"
+                f"  rm -rf {CACHE_DIR}"
+            ) from e
 
         # Lazy-import heavy deps
         import torch
@@ -75,11 +76,17 @@ class RAMPlusModel:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_device(device: Optional[str]) -> "torch.device":
+    def _resolve_device(device: Optional[str] = None) -> "torch.device":
         import torch
 
         if device:
-            return torch.device(device)
+            try:
+                return torch.device(device)
+            except RuntimeError as e:
+                raise ModelError(
+                    f"Invalid device '{device}'. Valid options: cpu, cuda, mps.\n"
+                    f"  Detail: {e}"
+                ) from e
         if torch.cuda.is_available():
             return torch.device("cuda")
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -93,20 +100,64 @@ class RAMPlusModel:
     @staticmethod
     def _ensure_checkpoint() -> Path:
         """Download the RAM++ checkpoint from HuggingFace if not cached."""
-        from huggingface_hub import hf_hub_download
-
         dest = CACHE_DIR / HF_FILENAME
+
         if dest.exists():
+            # Validate file isn't truncated / corrupted
+            size = dest.stat().st_size
+            if size < _MIN_CHECKPOINT_BYTES:
+                raise CheckpointCorruptionError(
+                    f"Cached checkpoint appears corrupted ({size:,} bytes).\n"
+                    f"Delete and retry:\n"
+                    f"  rm {dest}\n"
+                    f"  photoram info"
+                )
             return dest
 
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        downloaded = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename=HF_FILENAME,
-            local_dir=str(CACHE_DIR),
-            local_dir_use_symlinks=False,
-        )
-        return Path(downloaded)
+
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError:
+            raise CheckpointDownloadError(
+                "huggingface-hub is not installed. Reinstall photoram:\n"
+                "  pip install -e ."
+            )
+
+        try:
+            downloaded = hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename=HF_FILENAME,
+                local_dir=str(CACHE_DIR),
+                local_dir_use_symlinks=False,
+            )
+        except OSError as e:
+            raise CheckpointDownloadError(
+                f"Network error downloading model checkpoint:\n  {e}\n\n"
+                f"Remediation:\n"
+                f"  • Check your internet connection\n"
+                f"  • If behind a proxy, set HTTPS_PROXY\n"
+                f"  • Try again: photoram info"
+            ) from e
+        except Exception as e:
+            raise CheckpointDownloadError(
+                f"Failed to download model checkpoint:\n  {e}\n\n"
+                f"Remediation:\n"
+                f"  • Ensure you have write access to {CACHE_DIR}\n"
+                f"  • Try again: photoram info"
+            ) from e
+
+        path = Path(downloaded)
+
+        # Post-download validation
+        if path.exists() and path.stat().st_size < _MIN_CHECKPOINT_BYTES:
+            path.unlink(missing_ok=True)
+            raise CheckpointCorruptionError(
+                "Downloaded checkpoint appears truncated. Deleted and retrying may help:\n"
+                f"  photoram info"
+            )
+
+        return path
 
     # ------------------------------------------------------------------
     # Lazy model loading
@@ -115,19 +166,27 @@ class RAMPlusModel:
     @property
     def model(self) -> "torch.nn.Module":
         if self._model is None:
-            from ram.models import ram_plus
+            try:
+                from ram.models import ram_plus
 
-            self._model = ram_plus(
-                pretrained=self.pretrained_path,
-                image_size=self.image_size,
-                vit="swin_l",
-            )
-            self._model.eval()
-            self._model = self._model.to(self.device)
+                self._model = ram_plus(
+                    pretrained=self.pretrained_path,
+                    image_size=self.image_size,
+                    vit="swin_l",
+                )
+                self._model.eval()
+                self._model = self._model.to(self.device)
+            except Exception as e:
+                raise ModelError(
+                    f"Failed to load RAM++ model: {e}\n\n"
+                    f"Remediation:\n"
+                    f"  • Ensure checkpoint is not corrupted: rm -rf {CACHE_DIR}\n"
+                    f"  • Ensure sufficient GPU memory or use --device cpu"
+                ) from e
         return self._model
 
     # ------------------------------------------------------------------
-    # Inference
+    # Single-image inference
     # ------------------------------------------------------------------
 
     def tag_image(self, image_path: str | Path) -> TagResult:
@@ -135,7 +194,16 @@ class RAMPlusModel:
         import torch
         from PIL import Image
 
-        image = self.transform(Image.open(image_path)).unsqueeze(0).to(self.device)
+        try:
+            image = self.transform(Image.open(image_path)).unsqueeze(0).to(self.device)
+        except Exception as e:
+            return TagResult(
+                path=str(image_path),
+                tags=[],
+                tags_chinese=[],
+                confidences=[],
+                error=f"Failed to load image: {e}",
+            )
 
         with torch.no_grad():
             tags_en, tags_zh, confidences = self._inference_with_confidence(image)
@@ -147,17 +215,97 @@ class RAMPlusModel:
             confidences=confidences,
         )
 
+    # ------------------------------------------------------------------
+    # Batch inference
+    # ------------------------------------------------------------------
+
+    def tag_images(
+        self,
+        image_paths: list[str | Path],
+        batch_size: int = 4,
+    ) -> list[TagResult]:
+        """Run RAM++ on multiple images with optional batching.
+
+        Args:
+            image_paths: List of image file paths.
+            batch_size: Number of images to process per forward pass.
+                        Larger batches are faster on GPU but use more memory.
+
+        Returns:
+            List of TagResult, one per input image (order preserved).
+        """
+        import torch
+        from PIL import Image
+
+        # Pre-load and transform all images, tracking failures
+        loaded: list[tuple[int, "torch.Tensor"]] = []
+        failed: list[tuple[int, TagResult]] = []
+
+        for idx, img_path in enumerate(image_paths):
+            try:
+                tensor = self.transform(Image.open(img_path)).to(self.device)
+                loaded.append((idx, tensor))
+            except Exception as e:
+                failed.append((idx, TagResult(
+                    path=str(img_path),
+                    tags=[],
+                    tags_chinese=[],
+                    confidences=[],
+                    error=f"Failed to load image: {e}",
+                )))
+
+        # Process in batches
+        batch_results: list[tuple[int, TagResult]] = []
+        for batch_start in range(0, len(loaded), batch_size):
+            batch = loaded[batch_start:batch_start + batch_size]
+            indices = [idx for idx, _ in batch]
+            tensors = torch.stack([t for _, t in batch]).to(self.device)
+
+            with torch.no_grad():
+                batch_tags = self._batch_inference_with_confidence(tensors)
+
+            for i, (tags_en, tags_zh, confs) in enumerate(batch_tags):
+                batch_results.append((indices[i], TagResult(
+                    path=str(image_paths[indices[i]]),
+                    tags=tags_en,
+                    tags_chinese=tags_zh,
+                    confidences=confs,
+                )))
+
+        # Merge and sort by original index
+        all_indexed = batch_results + failed
+        all_indexed.sort(key=lambda x: x[0])
+        return [r for _, r in all_indexed]
+
+    # ------------------------------------------------------------------
+    # Core inference (single image tensor)
+    # ------------------------------------------------------------------
+
     def _inference_with_confidence(
         self, image: "torch.Tensor"
     ) -> tuple[list[str], list[str], list[float]]:
         """Custom inference that also returns per-tag confidence scores."""
+        results = self._batch_inference_with_confidence(image)
+        return results[0]
+
+    def _batch_inference_with_confidence(
+        self, images: "torch.Tensor"
+    ) -> list[tuple[list[str], list[str], list[float]]]:
+        """Batch inference returning per-tag confidence scores for each image.
+
+        Args:
+            images: Tensor of shape (B, C, H, W).
+
+        Returns:
+            List of (tags_en, tags_zh, confidences) tuples, one per image.
+        """
         import torch
         model = self.model
 
-        image_embeds = model.image_proj(model.visual_encoder(image))
+        image_embeds = model.image_proj(model.visual_encoder(images))
         image_atts = torch.ones(
             image_embeds.size()[:-1], dtype=torch.long
-        ).to(image.device)
+        ).to(images.device)
 
         image_cls_embeds = image_embeds[:, 0, :]
 
@@ -174,7 +322,7 @@ class RAMPlusModel:
         weight_normalized = torch.nn.functional.softmax(logits_per_image, dim=2)
         label_embed_reweight = torch.empty(
             bs, model.num_class, 512
-        ).to(image.device).to(image.dtype)
+        ).to(images.device).to(images.dtype)
 
         for i in range(bs):
             reshaped_value = model.label_embed.view(-1, des_per_class, 512)
@@ -198,11 +346,9 @@ class RAMPlusModel:
 
         # Apply per-class thresholds from the model, or user override
         if self.threshold != DEFAULT_THRESHOLD:
-            # User explicitly set a custom threshold — use it uniformly
-            class_threshold = torch.ones(model.num_class, device=image.device) * self.threshold
+            class_threshold = torch.ones(model.num_class, device=images.device) * self.threshold
         else:
-            # Use the model's per-class calibrated thresholds
-            class_threshold = model.class_threshold.to(image.device)
+            class_threshold = model.class_threshold.to(images.device)
 
         targets = (probs > class_threshold).float()
         tag_array = targets.cpu().numpy()
@@ -211,9 +357,7 @@ class RAMPlusModel:
         # Zero out delete indices
         tag_array[:, model.delete_tag_index] = 0
 
-        tags_en: list[str] = []
-        tags_zh: list[str] = []
-        confs: list[float] = []
+        results: list[tuple[list[str], list[str], list[float]]] = []
 
         for b in range(bs):
             indices = np.argwhere(tag_array[b] == 1).flatten()
@@ -227,10 +371,17 @@ class RAMPlusModel:
                 key=lambda x: x[2],
                 reverse=True,
             )
+
+            tags_en: list[str] = []
+            tags_zh: list[str] = []
+            confs: list[float] = []
+
             if combined:
                 t_en, t_zh, s = zip(*combined)
                 tags_en = list(t_en)
                 tags_zh = list(t_zh)
                 confs = [round(float(c), 4) for c in s]
 
-        return tags_en, tags_zh, confs
+            results.append((tags_en, tags_zh, confs))
+
+        return results

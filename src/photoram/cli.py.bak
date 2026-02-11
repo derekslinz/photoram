@@ -1,12 +1,4 @@
-"""photoram CLI — modern photo tagger powered by RAM++.
-
-Exit codes:
-    0 — success
-    1 — no images found
-    2 — invalid arguments (threshold, top-n, device, etc.)
-    3 — model error (download, corruption, inference)
-    4 — other runtime error
-"""
+"""photoram CLI — modern photo tagger powered by RAM++."""
 
 from __future__ import annotations
 
@@ -14,6 +6,7 @@ import csv
 import io
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -27,54 +20,18 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-
 from . import __version__
-from .errors import (
-    EXIT_INVALID_ARGS,
-    EXIT_NO_IMAGES,
-    EXIT_SUCCESS,
-    MetadataWriteError,
-    NoImagesError,
-    PhotoramError,
-    ValidationError,
-)
 from .metadata import write_metadata
-from .schemas import BatchResult
-from .service import TaggingService
-from .utils import format_tags_text
+from .model import RAMPlusModel, TagResult
+from .utils import (
+    apply_overrides,
+    collect_images,
+    format_result_json,
+    format_tags_text,
+    load_overrides,
+)
 
 console = Console(stderr=True)
-
-
-# ---------------------------------------------------------------------------
-# Click parameter validation callbacks
-# ---------------------------------------------------------------------------
-
-def _validate_threshold(ctx: click.Context, param: click.Parameter, value: float) -> float:
-    if not 0.0 <= value <= 1.0:
-        raise click.BadParameter(
-            f"Must be between 0.0 and 1.0, got {value}.",
-            param_hint="'--threshold'",
-        )
-    return value
-
-
-def _validate_top_n(ctx: click.Context, param: click.Parameter, value: Optional[int]) -> Optional[int]:
-    if value is not None and value < 1:
-        raise click.BadParameter(
-            f"Must be a positive integer, got {value}.",
-            param_hint="'--top-n'",
-        )
-    return value
-
-
-def _validate_batch_size(ctx: click.Context, param: click.Parameter, value: int) -> int:
-    if value < 1:
-        raise click.BadParameter(
-            f"Must be a positive integer, got {value}.",
-            param_hint="'--batch-size'",
-        )
-    return value
 
 
 # ---------------------------------------------------------------------------
@@ -94,10 +51,8 @@ def main() -> None:
 @main.command()
 @click.argument("input_paths", nargs=-1, required=True, metavar="INPUT...")
 @click.option("-t", "--threshold", type=float, default=0.68, show_default=True,
-              callback=_validate_threshold, expose_value=True, is_eager=True,
               help="Detection threshold (0.0–1.0).")
 @click.option("-n", "--top-n", type=int, default=None,
-              callback=_validate_top_n,
               help="Maximum number of tags to return.")
 @click.option("-c", "--confidence", is_flag=True, default=False,
               help="Show confidence scores.")
@@ -115,9 +70,6 @@ def main() -> None:
               help="Force device: cpu, cuda, mps (default: auto).")
 @click.option("--image-size", type=int, default=384, show_default=True,
               help="Input image size for the model.")
-@click.option("--batch-size", type=int, default=1, show_default=True,
-              callback=_validate_batch_size,
-              help="Images per inference batch (higher = faster on GPU, more VRAM).")
 @click.option("--chinese", is_flag=True, default=False,
               help="Also output Chinese tags.")
 @click.option("-q", "--quiet", is_flag=True, default=False,
@@ -141,7 +93,6 @@ def tag(
     overrides: Optional[str],
     device: Optional[str],
     image_size: int,
-    batch_size: int,
     chinese: bool,
     quiet: bool,
     # compat
@@ -152,13 +103,6 @@ def tag(
     """Tag one or more images using RAM++.
 
     INPUT can be image files or directories.
-
-    \b
-    Exit codes:
-      0  success
-      1  no images found
-      2  invalid arguments
-      3  model error
     """
     # ---- photils-cli compatibility layer ----
     if compat_image:
@@ -168,49 +112,39 @@ def tag(
     if compat_conf:
         confidence = True
 
-    # ---- Build service ----
-    try:
-        svc = TaggingService(
-            threshold=threshold,
-            device=device,
-            image_size=image_size,
-            top_n=top_n,
-            overrides=overrides,
-            batch_size=batch_size,
-        )
-    except ValidationError as e:
-        console.print(f"[red]Validation error:[/red] {e}")
-        raise SystemExit(EXIT_INVALID_ARGS)
+    # ---- Collect images ----
+    images = collect_images(input_paths, recursive=recursive)
+    if not images:
+        console.print("[red]No images found.[/red]")
+        raise SystemExit(1)
 
-    # ---- Print config (unless quiet) ----
-    if not quiet:
-        console.print(
-            "[dim]Device:[/dim] auto-detect" if device is None else f"[dim]Device:[/dim] {device}"
-        )
-        console.print(f"[dim]Threshold:[/dim] {threshold}")
-        if batch_size > 1:
-            console.print(f"[dim]Batch size:[/dim] {batch_size}")
-        console.print()
+    # ---- Load tag overrides ----
+    override_map = load_overrides(overrides)
 
     # ---- Load model ----
-    try:
-        with (
-            console.status("[bold green]Loading RAM++ model…[/bold green]", spinner="dots")
-            if not quiet
-            else _nullcontext()
-        ):
-            load_time = svc.load_model()
-    except PhotoramError as e:
-        console.print(f"[red]Model error:[/red] {e}")
-        raise SystemExit(e.exit_code)
+    if not quiet:
+        console.print("[dim]Device:[/dim] auto-detect" if device is None else f"[dim]Device:[/dim] {device}")
+        console.print(f"[dim]Threshold:[/dim] {threshold}")
+        console.print(f"[dim]Images:[/dim] {len(images)}")
+        console.print()
+
+    with console.status("[bold green]Loading RAM++ model…[/bold green]", spinner="dots") if not quiet else _nullcontext():
+        t0 = time.time()
+        ram_model = RAMPlusModel(
+            device=device,
+            image_size=image_size,
+            threshold=threshold,
+        )
+        # Force model load now
+        _ = ram_model.model
+        load_time = time.time() - t0
 
     if not quiet:
-        console.print(
-            f"[dim]Model loaded in {load_time:.1f}s on "
-            f"[bold]{svc.resolved_device}[/bold][/dim]\n"
-        )
+        console.print(f"[dim]Model loaded in {load_time:.1f}s on [bold]{ram_model.device}[/bold][/dim]\n")
 
-    # ---- Collect & tag images ----
+    # ---- Process images ----
+    results: list[TagResult] = []
+
     progress_ctx = Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -221,42 +155,38 @@ def tag(
         disable=quiet,
     )
 
-    try:
-        with progress_ctx as progress:
-            task_id = progress.add_task("Tagging", total=0)
-
-            def _on_progress(img_path: Path, current: int, total: int) -> None:
-                progress.update(task_id, total=total, completed=current,
-                                description=f"[cyan]{img_path.name}[/cyan]")
-
-            batch = svc.tag_paths(
-                input_paths,
-                recursive=recursive,
-                on_progress=_on_progress,
-            )
-    except NoImagesError as e:
-        console.print(f"[red]{e}[/red]")
-        raise SystemExit(EXIT_NO_IMAGES)
-    except PhotoramError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise SystemExit(e.exit_code)
-
-    # ---- Write metadata if requested ----
-    if write_meta:
-        for result in batch.succeeded:
+    with progress_ctx as progress:
+        task_id = progress.add_task("Tagging", total=len(images))
+        for img_path in images:
+            progress.update(task_id, description=f"[cyan]{img_path.name}[/cyan]")
             try:
-                write_metadata(result.path, result.tags)
-            except MetadataWriteError as e:
-                console.print(f"[yellow]Metadata warning:[/yellow] {e}")
+                result = ram_model.tag_image(img_path)
 
-    # ---- Report per-image errors ----
-    for result in batch.failed:
-        console.print(f"[red]Error processing {result.path}:[/red] {result.error}")
+                # Apply overrides
+                result.tags = apply_overrides(result.tags, override_map)
+
+                # Limit tags
+                if top_n:
+                    result.tags = result.tags[:top_n]
+                    result.tags_chinese = result.tags_chinese[:top_n]
+                    result.confidences = result.confidences[:top_n]
+
+                results.append(result)
+
+                # Write metadata if requested
+                if write_meta:
+                    try:
+                        write_metadata(img_path, result.tags)
+                    except RuntimeError as e:
+                        console.print(f"[yellow]Warning:[/yellow] {e}")
+
+            except Exception as e:
+                console.print(f"[red]Error processing {img_path}:[/red] {e}")
+
+            progress.advance(task_id)
 
     # ---- Output ----
-    _output_results(batch, fmt, confidence, chinese, output, quiet)
-
-    raise SystemExit(EXIT_SUCCESS)
+    _output_results(results, fmt, confidence, chinese, output, quiet)
 
 
 # ---------------------------------------------------------------------------
@@ -264,27 +194,25 @@ def tag(
 # ---------------------------------------------------------------------------
 
 def _output_results(
-    batch: BatchResult,
+    results: list[TagResult],
     fmt: str,
     show_confidence: bool,
     show_chinese: bool,
     output_path: Optional[str],
     quiet: bool,
 ) -> None:
-    """Write results in the chosen format.
-
-    JSON contract: **always a list**, even for a single image.
-    """
-    results = batch.results
+    """Write results in the chosen format."""
     buf = io.StringIO()
 
     if fmt == "json":
-        # Stable contract: always a JSON array
-        data = batch.to_list(
-            include_chinese=show_chinese,
-            include_confidences=show_confidence,
-        )
-        json.dump(data, buf, indent=2, ensure_ascii=False)
+        data = [
+            format_result_json(
+                r.path, r.tags, r.confidences,
+                r.tags_chinese if show_chinese else None,
+            )
+            for r in results
+        ]
+        json.dump(data if len(data) > 1 else data[0], buf, indent=2, ensure_ascii=False)
         buf.write("\n")
 
     elif fmt == "csv":
@@ -296,7 +224,7 @@ def _output_results(
             header.append("tags_chinese")
         writer.writerow(header)
         for r in results:
-            row: list[str] = [r.path, " | ".join(r.tags)]
+            row = [r.path, " | ".join(r.tags)]
             if show_confidence:
                 row.append(" | ".join(f"{c:.4f}" for c in r.confidences))
             if show_chinese:
@@ -340,7 +268,6 @@ def _output_results(
 class _nullcontext:
     def __enter__(self):
         return self
-
     def __exit__(self, *args):
         pass
 
@@ -371,8 +298,6 @@ def info(device: Optional[str]) -> None:
     console.print(f"  CUDA available: {torch.cuda.is_available()}")
     if hasattr(torch.backends, "mps"):
         console.print(f"  MPS available: {torch.backends.mps.is_available()}")
-
-    from .model import RAMPlusModel
     console.print(f"  Default device: {RAMPlusModel._resolve_device(device)}")
 
     from .model import CACHE_DIR, HF_FILENAME
