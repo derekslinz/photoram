@@ -99,7 +99,6 @@ def format_result_json(
     path: str,
     tags: list[str],
     confidences: list[float],
-    tags_chinese: Optional[list[str]] = None,
 ) -> dict:
     """Return a JSON-serializable dict for one image."""
     d: dict = {
@@ -107,6 +106,4 @@ def format_result_json(
         "tags": tags,
         "confidences": confidences,
     }
-    if tags_chinese:
-        d["tags_chinese"] = tags_chinese
     return d

@@ -23,14 +23,6 @@ class TestTagResult:
         assert "tags_chinese" not in d
         assert "error" not in d
 
-    def test_to_dict_with_chinese(self) -> None:
-        r = TagResult(
-            path="a.jpg", tags=["tree"], tags_chinese=["树"],
-            confidences=[0.9],
-        )
-        d = r.to_dict(include_chinese=True)
-        assert d["tags_chinese"] == ["树"]
-
     def test_to_dict_without_confidences(self) -> None:
         r = TagResult(path="a.jpg", tags=["tree"], confidences=[0.9])
         d = r.to_dict(include_confidences=False)

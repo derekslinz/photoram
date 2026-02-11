@@ -16,19 +16,16 @@ from photoram.schemas import BatchResult, TagResult
 
 @pytest.fixture
 def runner() -> CliRunner:
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 def _single_success_batch(
     path: str = "image.jpg",
     tags: list[str] | None = None,
-    tags_chinese: list[str] | None = None,
     confidences: list[float] | None = None,
 ) -> BatchResult:
     if tags is None:
         tags = ["tree", "sky"]
-    if tags_chinese is None:
-        tags_chinese = ["shu", "tiankong"]
     if confidences is None:
         confidences = [0.91, 0.82]
     return BatchResult(
@@ -36,7 +33,6 @@ def _single_success_batch(
             TagResult(
                 path=path,
                 tags=tags,
-                tags_chinese=tags_chinese,
                 confidences=confidences,
             )
         ]
@@ -92,32 +88,6 @@ class TestCLIOutputIntegration:
         assert data_with[0]["confidences"] == [0.9, 0.8]
 
     @patch("photoram.cli.TaggingService")
-    def test_json_chinese_flag_controls_field(
-        self, mock_svc_cls: MagicMock, runner: CliRunner, sample_image: Path
-    ) -> None:
-        mock_svc = MagicMock()
-        mock_svc_cls.return_value = mock_svc
-        mock_svc.load_model.return_value = 0.01
-        mock_svc.resolved_device = "cpu"
-        mock_svc.tag_paths.return_value = _single_success_batch(tags_chinese=["shu"])
-
-        result_without = runner.invoke(
-            main,
-            ["tag", str(sample_image), "--format", "json", "--quiet"],
-        )
-        assert result_without.exit_code == EXIT_SUCCESS
-        data_without = json.loads(result_without.output)
-        assert "tags_chinese" not in data_without[0]
-
-        result_with = runner.invoke(
-            main,
-            ["tag", str(sample_image), "--format", "json", "--chinese", "--quiet"],
-        )
-        assert result_with.exit_code == EXIT_SUCCESS
-        data_with = json.loads(result_with.output)
-        assert data_with[0]["tags_chinese"] == ["shu"]
-
-    @patch("photoram.cli.TaggingService")
     def test_photils_compat_image_alias(
         self, mock_svc_cls: MagicMock, runner: CliRunner, sample_image: Path
     ) -> None:
@@ -162,7 +132,7 @@ class TestCLIOutputIntegration:
         assert output_file.exists()
         content = output_file.read_text(encoding="utf-8")
         assert "tree" in content
-        assert "%" in content
+        assert "0.95" in content
 
     def test_tag_requires_input_when_no_compat_image(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["tag"])

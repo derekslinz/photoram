@@ -30,7 +30,6 @@ def _mock_batch(*tags_lists: list[str]) -> BatchResult:
         results.append(TagResult(
             path=f"image_{i}.jpg",
             tags=tags,
-            tags_chinese=[f"zh_{t}" for t in tags],
             confidences=[0.9 - j * 0.1 for j in range(len(tags))],
         ))
     return BatchResult(results=results)
@@ -52,12 +51,31 @@ class TestCLIBasics:
         assert "tag" in result.output
         assert "info" in result.output
 
+    def test_short_help_alias(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["-h"])
+        assert result.exit_code == 0
+        assert "tag" in result.output
+        assert "info" in result.output
+
     def test_tag_help(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["tag", "--help"])
         assert result.exit_code == 0
         assert "--threshold" in result.output
         assert "--batch-size" in result.output
         assert "--timings" in result.output
+        assert "--device" not in result.output
+
+    def test_tag_short_help_alias(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["tag", "-h"])
+        assert result.exit_code == 0
+        assert "--threshold" in result.output
+        assert "--timings" in result.output
+        assert "--device" not in result.output
+
+    def test_info_help_hides_device(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["info", "--help"])
+        assert result.exit_code == 0
+        assert "--device" not in result.output
 
 
 # ---------------------------------------------------------------------------

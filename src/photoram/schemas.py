@@ -15,7 +15,6 @@ class TagResult:
 
     path: str
     tags: list[str]
-    tags_chinese: list[str] = field(default_factory=list)
     confidences: list[float] = field(default_factory=list)
     error: Optional[str] = None
     image_megapixels: Optional[float] = None
@@ -27,7 +26,6 @@ class TagResult:
 
     def to_dict(
         self,
-        include_chinese: bool = False,
         include_confidences: bool = True,
     ) -> dict:
         """Serialize to a JSON-compatible dict.
@@ -40,8 +38,6 @@ class TagResult:
         }
         if include_confidences:
             d["confidences"] = self.confidences
-        if include_chinese:
-            d["tags_chinese"] = self.tags_chinese
         if self.error is not None:
             d["error"] = self.error
         return d
@@ -66,7 +62,6 @@ class BatchResult:
 
     def to_list(
         self,
-        include_chinese: bool = False,
         include_confidences: bool = True,
     ) -> list[dict]:
         """Serialize all results to a list of dicts.
@@ -76,7 +71,6 @@ class BatchResult:
         """
         return [
             r.to_dict(
-                include_chinese=include_chinese,
                 include_confidences=include_confidences,
             )
             for r in self.results

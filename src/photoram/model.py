@@ -28,6 +28,7 @@ HF_FILENAME = "ram_plus_swin_large_14m.pth"
 
 DEFAULT_IMAGE_SIZE = 384
 DEFAULT_THRESHOLD = 0.68
+SUPPORTED_IMAGE_SIZES = {224, 384}
 
 # Minimum reasonable checkpoint size (100 MB) — guards against truncated downloads
 _MIN_CHECKPOINT_BYTES = 100 * 1024 * 1024
@@ -52,7 +53,7 @@ class RAMPlusModel:
         threshold: float = DEFAULT_THRESHOLD,
         pretrained_path: Optional[str] = None,
     ) -> None:
-        self.image_size = image_size
+        self.image_size = self._resolve_ram_image_size(image_size)
         self.threshold = threshold
 
         try:
@@ -74,6 +75,26 @@ class RAMPlusModel:
         self.transform = get_transform(image_size=self.image_size)
 
         self._model: Optional[torch.nn.Module] = None
+
+    @staticmethod
+    def _resolve_ram_image_size(image_size: int) -> int:
+        """Normalize unsupported image sizes to a known-good RAM++ setting.
+
+        RAM++ (swin_b/swin_l paths) only supports 224 and 384 in upstream code.
+        Other values can raise:
+          UnboundLocalError: local variable 'vision_config_path' referenced before assignment
+        """
+        if image_size in SUPPORTED_IMAGE_SIZES:
+            return image_size
+
+        warnings.warn(
+            "RAM++ only supports image sizes 224 or 384 for Swin backbones. "
+            f"Received {image_size}; falling back to {DEFAULT_IMAGE_SIZE} "
+            "to avoid upstream vision_config_path errors.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return DEFAULT_IMAGE_SIZE
 
     # ------------------------------------------------------------------
     # Device resolution
@@ -206,18 +227,16 @@ class RAMPlusModel:
             return TagResult(
                 path=str(image_path),
                 tags=[],
-                tags_chinese=[],
                 confidences=[],
                 error=f"Failed to load image: {e}",
             )
 
         with torch.no_grad():
-            tags_en, tags_zh, confidences = self._inference_with_confidence(image)
+            tags_en, confidences = self._inference_with_confidence(image)
 
         return TagResult(
             path=str(image_path),
             tags=tags_en,
-            tags_chinese=tags_zh,
             confidences=confidences,
             image_megapixels=image_mp,
         )
@@ -294,21 +313,21 @@ class RAMPlusModel:
 
     def _inference_with_confidence(
         self, image: "torch.Tensor"
-    ) -> tuple[list[str], list[str], list[float]]:
+    ) -> tuple[list[str], list[float]]:
         """Custom inference that also returns per-tag confidence scores."""
         results = self._batch_inference_with_confidence(image)
         return results[0]
 
     def _batch_inference_with_confidence(
         self, images: "torch.Tensor"
-    ) -> list[tuple[list[str], list[str], list[float]]]:
+    ) -> list[tuple[list[str], list[float]]]:
         """Batch inference returning per-tag confidence scores for each image.
 
         Args:
             images: Tensor of shape (B, C, H, W).
 
         Returns:
-            List of (tags_en, tags_zh, confidences) tuples, one per image.
+            List of (tags_en, confidences) tuples, one per image.
         """
         import torch
         model = self.model
@@ -368,31 +387,28 @@ class RAMPlusModel:
         # Zero out delete indices
         tag_array[:, model.delete_tag_index] = 0
 
-        results: list[tuple[list[str], list[str], list[float]]] = []
+        results: list[tuple[list[str], list[float]]] = []
 
         for b in range(bs):
             indices = np.argwhere(tag_array[b] == 1).flatten()
             tokens_en = model.tag_list[indices].tolist()
-            tokens_zh = model.tag_list_chinese[indices].tolist()
             scores = prob_array[b][indices].tolist()
 
             # Sort by confidence descending
             combined = sorted(
-                zip(tokens_en, tokens_zh, scores),
-                key=lambda x: x[2],
+                zip(tokens_en, scores),
+                key=lambda x: x[1],
                 reverse=True,
             )
 
             tags_en: list[str] = []
-            tags_zh: list[str] = []
             confs: list[float] = []
 
             if combined:
-                t_en, t_zh, s = zip(*combined)
+                t_en, s = zip(*combined)
                 tags_en = list(t_en)
-                tags_zh = list(t_zh)
                 confs = [round(float(c), 4) for c in s]
 
-            results.append((tags_en, tags_zh, confs))
+            results.append((tags_en, confs))
 
         return results

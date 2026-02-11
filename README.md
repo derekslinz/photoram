@@ -97,10 +97,8 @@ Options:
   -f, --format FORMAT    Output format: text, json, csv (default: text)
   -o, --output FILE      Write results to file
   -r, --recursive        Recursively scan directories
-  -w, --write-metadata   Write tags to image EXIF/XMP/IPTC metadata
+      -w, --write-metadata   Write tags to image EXIF/XMP/IPTC metadata
       --overrides FILE   Tag override/translation JSON file
-      --device DEVICE    Force device: cpu, cuda, mps (default: auto)
-      --image-size INT   Input image size (default: 384)
       --batch-size INT   Images per inference batch (default: 1)
       --chinese          Also output Chinese tags
   -T, --timings          Print basic timings (load, tagging, total)

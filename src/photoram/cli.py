@@ -66,6 +66,7 @@ console = Console(
 
 # Pick an ASCII-safe spinner when the terminal lacks UTF-8
 _SPINNER = "line" if _SAFE else "dots"
+_HELP_OPTION_NAMES = {"help_option_names": ["-h", "--help"]}
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +104,7 @@ def _validate_batch_size(ctx: click.Context, param: click.Parameter, value: int)
 # CLI group
 # ---------------------------------------------------------------------------
 
-@click.group()
+@click.group(context_settings=_HELP_OPTION_NAMES)
 @click.version_option(__version__, prog_name="photoram-cli")
 def main() -> None:
     """photoram-cli — Modern CLI photo tagger powered by RAM++."""
@@ -113,7 +114,7 @@ def main() -> None:
 # tag command
 # ---------------------------------------------------------------------------
 
-@main.command()
+@main.command(context_settings=_HELP_OPTION_NAMES)
 @click.argument("input_paths", nargs=-1, required=False, metavar="INPUT...")
 @click.option("-t", "--threshold", type=float, default=0.80, show_default=True,
               callback=_validate_threshold, expose_value=True, is_eager=True,
@@ -133,16 +134,12 @@ def main() -> None:
               help="Write tags to image EXIF/XMP/IPTC metadata.")
 @click.option("--overrides", type=click.Path(exists=True), default=None,
               help="Tag override/translation JSON file.")
-@click.option("--device", type=str, default=None,
+@click.option("--device", type=str, default=None, hidden=True,
               help="Force device: cpu, cuda, mps (default: auto).")
-@click.option("--image-size", type=int, default=512, show_default=True,
-              help="Input image size for the model.")
 @click.option("--batch-size", type=int, default=32, show_default=True,
               callback=_validate_batch_size,
               help="Images per inference batch (higher = faster on GPU, more VRAM).")
-@click.option("--chinese", is_flag=False, default=False,
-              help="Also output Chinese tags.")
-@click.option("-T", "--timings", is_flag=True, default=True,
+@click.option("-T", "--timings", is_flag=True, default=False,
               help="Print basic timings (load, tagging, total).")
 @click.option("-q", "--quiet", is_flag=True, default=False,
               help="Suppress progress output.")
@@ -164,9 +161,7 @@ def tag(
     write_meta: bool,
     overrides: Optional[str],
     device: Optional[str],
-    image_size: int,
     batch_size: int,
-    chinese: bool,
     timings: bool,
     quiet: bool,
     # compat
@@ -188,6 +183,7 @@ def tag(
     # ---- photils-cli compatibility layer ----
     if compat_image:
         input_paths = (compat_image, *input_paths)
+        recursive = False
     if compat_output and not output:
         output = compat_output
     if compat_conf:
@@ -202,7 +198,6 @@ def tag(
         svc = TaggingService(
             threshold=threshold,
             device=device,
-            image_size=image_size,
             top_n=top_n,
             overrides=overrides,
             batch_size=batch_size,
@@ -288,7 +283,7 @@ def tag(
         console.print(f"[red]Error processing {result.path}:[/red] {result.error}")
 
     # ---- Output ----
-    _output_results(batch, fmt, confidence, chinese, output, quiet)
+    _output_results(batch, fmt, confidence, output, quiet)
 
     if timings:
         total_time = time.perf_counter() - total_start
@@ -314,7 +309,6 @@ def _output_results(
     batch: BatchResult,
     fmt: str,
     show_confidence: bool,
-    show_chinese: bool,
     output_path: Optional[str],
     quiet: bool,
 ) -> None:
@@ -328,7 +322,6 @@ def _output_results(
     if fmt == "json":
         # Stable contract: always a JSON array
         data = batch.to_list(
-            include_chinese=show_chinese,
             include_confidences=show_confidence,
         )
         json.dump(data, buf, indent=2, ensure_ascii=False)
@@ -339,15 +332,11 @@ def _output_results(
         header = ["file", "tags"]
         if show_confidence:
             header.append("confidences")
-        if show_chinese:
-            header.append("tags_chinese")
         writer.writerow(header)
         for r in results:
             row: list[str] = [r.path, " | ".join(r.tags)]
             if show_confidence:
                 row.append(" | ".join(f"{c:.4f}" for c in r.confidences))
-            if show_chinese:
-                row.append(" | ".join(r.tags_chinese))
             writer.writerow(row)
 
     else:  # text
@@ -356,19 +345,12 @@ def _output_results(
             r = results[0]
             buf.write(format_tags_text(r.tags, r.confidences, show_confidence))
             buf.write("\n")
-            if show_chinese:
-                buf.write(format_tags_text(r.tags_chinese))
-                buf.write("\n")
         else:
             # Multi-image: table-like output
             for r in results:
                 buf.write(f"{r.path}\t")
                 buf.write(format_tags_text(r.tags, r.confidences, show_confidence))
                 buf.write("\n")
-                if show_chinese:
-                    buf.write(f"{r.path}\t")
-                    buf.write(format_tags_text(r.tags_chinese))
-                    buf.write("\n")
 
     text = buf.getvalue()
 
@@ -443,8 +425,8 @@ def _compat_tag(ctx: click.Context) -> None:
 # info command
 # ---------------------------------------------------------------------------
 
-@main.command()
-@click.option("--device", type=str, default=None)
+@main.command(context_settings=_HELP_OPTION_NAMES)
+@click.option("--device", type=str, default=None, hidden=True)
 def info(device: Optional[str]) -> None:
     """Show model and environment info."""
     import torch
