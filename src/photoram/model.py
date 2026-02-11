@@ -110,7 +110,7 @@ class RAMPlusModel:
                     f"Cached checkpoint appears corrupted ({size:,} bytes).\n"
                     f"Delete and retry:\n"
                     f"  rm {dest}\n"
-                    f"  photoram info"
+                    f"  photoram-cli info"
                 )
             return dest
 
@@ -137,14 +137,14 @@ class RAMPlusModel:
                 f"Remediation:\n"
                 f"  • Check your internet connection\n"
                 f"  • If behind a proxy, set HTTPS_PROXY\n"
-                f"  • Try again: photoram info"
+                f"  • Try again: photoram-cli info"
             ) from e
         except Exception as e:
             raise CheckpointDownloadError(
                 f"Failed to download model checkpoint:\n  {e}\n\n"
                 f"Remediation:\n"
                 f"  • Ensure you have write access to {CACHE_DIR}\n"
-                f"  • Try again: photoram info"
+                f"  • Try again: photoram-cli info"
             ) from e
 
         path = Path(downloaded)
@@ -154,7 +154,7 @@ class RAMPlusModel:
             path.unlink(missing_ok=True)
             raise CheckpointCorruptionError(
                 "Downloaded checkpoint appears truncated. Deleted and retrying may help:\n"
-                f"  photoram info"
+                f"  photoram-cli info"
             )
 
         return path

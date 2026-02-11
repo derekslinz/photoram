@@ -44,7 +44,7 @@ class TestCLIBasics:
     def test_version(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "photoram" in result.output
+        assert "photoram-cli" in result.output
 
     def test_help(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["--help"])
@@ -57,6 +57,7 @@ class TestCLIBasics:
         assert result.exit_code == 0
         assert "--threshold" in result.output
         assert "--batch-size" in result.output
+        assert "--timings" in result.output
 
 
 # ---------------------------------------------------------------------------

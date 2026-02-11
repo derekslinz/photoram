@@ -39,7 +39,7 @@ dev = ["pytest>=7.0", "pytest-cov>=4.0"]
 all = ["pyexiv2>=2.8"]
 
 [project.scripts]
-photoram = "photoram.cli:main"
+photoram-cli = "photoram.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

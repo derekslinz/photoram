@@ -1,4 +1,4 @@
-"""photoram CLI — modern photo tagger powered by RAM++.
+"""photoram-cli CLI — modern photo tagger powered by RAM++.
 
 Exit codes:
     0 — success
@@ -10,10 +10,13 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import json
+import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -43,7 +46,26 @@ from .schemas import BatchResult
 from .service import TaggingService
 from .utils import format_tags_text
 
-console = Console(stderr=True)
+
+def _is_utf8_capable() -> bool:
+    """Check if stderr supports UTF-8 output."""
+    try:
+        encoding = getattr(sys.stderr, "encoding", None) or ""
+        return "utf" in encoding.lower()
+    except Exception:
+        return False
+
+
+# Force safe box-drawing and no colour when the terminal can't handle it
+_SAFE = not _is_utf8_capable()
+console = Console(
+    stderr=True,
+    safe_box=_SAFE,
+    no_color=not sys.stderr.isatty(),
+)
+
+# Pick an ASCII-safe spinner when the terminal lacks UTF-8
+_SPINNER = "line" if _SAFE else "dots"
 
 
 # ---------------------------------------------------------------------------
@@ -82,9 +104,9 @@ def _validate_batch_size(ctx: click.Context, param: click.Parameter, value: int)
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(__version__, prog_name="photoram")
+@click.version_option(__version__, prog_name="photoram-cli")
 def main() -> None:
-    """photoram — Modern CLI photo tagger powered by RAM++."""
+    """photoram-cli — Modern CLI photo tagger powered by RAM++."""
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +142,8 @@ def main() -> None:
               help="Images per inference batch (higher = faster on GPU, more VRAM).")
 @click.option("--chinese", is_flag=True, default=False,
               help="Also output Chinese tags.")
+@click.option("-T", "--timings", is_flag=True, default=False,
+              help="Print basic timings (load, tagging, total).")
 @click.option("-q", "--quiet", is_flag=True, default=False,
               help="Suppress progress output.")
 # photils-cli compat aliases
@@ -143,6 +167,7 @@ def tag(
     image_size: int,
     batch_size: int,
     chinese: bool,
+    timings: bool,
     quiet: bool,
     # compat
     compat_image: Optional[str],
@@ -169,6 +194,8 @@ def tag(
         confidence = True
     if not input_paths:
         raise click.UsageError("Missing argument 'INPUT...'.")
+
+    total_start = time.perf_counter()
 
     # ---- Build service ----
     try:
@@ -197,11 +224,14 @@ def tag(
     # ---- Load model ----
     try:
         with (
-            console.status("[bold green]Loading RAM++ model…[/bold green]", spinner="dots")
+            console.status("Loading RAM++ model...", spinner=_SPINNER)
             if not quiet
             else _nullcontext()
         ):
-            load_time = svc.load_model()
+            # Suppress RAM model's stdout prints ("load checkpoint from...",
+            # "vit: swin_l") that would contaminate piped output.
+            with _suppress_stdout():
+                load_time = svc.load_model()
     except PhotoramError as e:
         console.print(f"[red]Model error:[/red] {e}")
         raise SystemExit(e.exit_code)
@@ -214,9 +244,9 @@ def tag(
 
     # ---- Collect & tag images ----
     progress_ctx = Progress(
-        SpinnerColumn(),
+        SpinnerColumn(spinner_name=_SPINNER),
         TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
+        BarColumn(complete_style="green"),
         MofNCompleteColumn(),
         TimeElapsedColumn(),
         console=console,
@@ -224,6 +254,7 @@ def tag(
     )
 
     try:
+        tag_start = time.perf_counter()
         with progress_ctx as progress:
             task_id = progress.add_task("Tagging", total=0)
 
@@ -236,6 +267,7 @@ def tag(
                 recursive=recursive,
                 on_progress=_on_progress,
             )
+        tag_time = time.perf_counter() - tag_start
     except NoImagesError as e:
         console.print(f"[red]{e}[/red]")
         raise SystemExit(EXIT_NO_IMAGES)
@@ -257,6 +289,10 @@ def tag(
 
     # ---- Output ----
     _output_results(batch, fmt, confidence, chinese, output, quiet)
+
+    if timings:
+        total_time = time.perf_counter() - total_start
+        _print_timings(load_time=load_time, tag_time=tag_time, total_time=total_time)
 
     raise SystemExit(EXIT_SUCCESS)
 
@@ -347,8 +383,35 @@ class _nullcontext:
         pass
 
 
+def _print_timings(load_time: float, tag_time: float, total_time: float) -> None:
+    """Print a compact timing summary to stderr."""
+    console.print("[dim]Timings:[/dim]")
+    console.print(f"[dim]  model load:[/dim] {load_time:.3f}s")
+    console.print(f"[dim]  tagging:[/dim] {tag_time:.3f}s")
+    console.print(f"[dim]  total:[/dim] {total_time:.3f}s")
+
+
+@contextlib.contextmanager
+def _suppress_stdout():
+    """Redirect stdout to devnull to suppress noisy library prints.
+
+    The RAM package prints 'load checkpoint from ...' and 'vit: swin_l'
+    directly to stdout during model loading, which contaminates piped
+    JSON/CSV output.  This silences those prints.
+    """
+    old_fd = os.dup(1)
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 1)
+        os.close(devnull)
+        yield
+    finally:
+        os.dup2(old_fd, 1)
+        os.close(old_fd)
+
+
 # ---------------------------------------------------------------------------
-# photils-cli compat: `photoram --image X` at top level
+# photils-cli compat: `photoram-cli --image X` at top level
 # ---------------------------------------------------------------------------
 
 @main.command(hidden=True, name="compat-tag")
@@ -368,7 +431,7 @@ def info(device: Optional[str]) -> None:
     """Show model and environment info."""
     import torch
 
-    console.print(f"[bold]photoram[/bold] v{__version__}")
+    console.print(f"[bold]photoram-cli[/bold] v{__version__}")
     console.print(f"  PyTorch: {torch.__version__}")
     console.print(f"  CUDA available: {torch.cuda.is_available()}")
     if hasattr(torch.backends, "mps"):

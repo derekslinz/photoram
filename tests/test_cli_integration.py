@@ -16,7 +16,7 @@ from photoram.schemas import BatchResult, TagResult
 
 @pytest.fixture
 def runner() -> CliRunner:
-    return CliRunner()
+    return CliRunner(mix_stderr=False)
 
 
 def _single_success_batch(
@@ -167,7 +167,27 @@ class TestCLIOutputIntegration:
     def test_tag_requires_input_when_no_compat_image(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["tag"])
         assert result.exit_code == 2
-        assert "Missing argument 'INPUT...'" in result.output
+        # With mix_stderr=False, Click writes usage errors to stderr
+        combined = (result.output or "") + (result.stderr or "")
+        assert "Missing argument 'INPUT...'" in combined
+
+    @patch("photoram.cli.TaggingService")
+    def test_timings_flag_prints_basic_timings(
+        self, mock_svc_cls: MagicMock, runner: CliRunner, sample_image: Path
+    ) -> None:
+        mock_svc = MagicMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_svc.load_model.return_value = 0.01
+        mock_svc.resolved_device = "cpu"
+        mock_svc.tag_paths.return_value = _single_success_batch()
+
+        result = runner.invoke(main, ["tag", str(sample_image), "-T", "--quiet"])
+
+        assert result.exit_code == EXIT_SUCCESS
+        assert "Timings:" in result.stderr
+        assert "model load:" in result.stderr
+        assert "tagging:" in result.stderr
+        assert "total:" in result.stderr
 
 
 class TestCLIMetadataIntegration:

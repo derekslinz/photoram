@@ -1,60 +1,43 @@
 # photoram
 
-`photoram` is a CLI photo tagger powered by RAM++ (Recognize Anything Model Plus Plus). It runs fully offline and is designed as a drop-in spiritual successor to [photils-cli](https://github.com/scheckmedia/photils-cli).
+`photoram` is a CLI photo tagger powered by RAM++ (Recognize Anything Model Plus Plus). It is designed as a modern, scriptable successor to [photils-cli](https://github.com/scheckmedia/photils-cli). The installed command is `photoram-cli`.
 
-## New Features
+## Highlights
 
-- Batch inference with `--batch-size` for better GPU throughput.
-- Stable JSON contract: `--format json` always returns a list.
-- Standardized exit codes and clearer validation errors.
-- Service-layer architecture (`TaggingService`) separating CLI and model logic.
-- Expanded automated CLI coverage in `tests/test_cli.py` and `tests/test_cli_integration.py`.
-- photils-cli compatibility flags: `--image`, `--output_file`, `--with_confidence`.
+- RAM++ tagging with 4,585+ open-set labels.
+- Offline inference after first-run checkpoint download.
+- Batch inference (`--batch-size`) for better GPU throughput.
+- Stable JSON output contract: `--format json` always returns a list.
+- Standardized exit codes and validation errors.
+- Service-layer architecture (`TaggingService`) that decouples CLI from model internals.
+- photils compatibility flags: `--image`, `--output_file`, `--with_confidence`.
 
-## Features
-
-- 4,585+ tags from RAM++ open-set vocabulary.
-- Fully offline tagging.
-- Recursive directory tagging.
-- Confidence scores and optional Chinese tags.
-- Text, JSON, and CSV output formats.
-- EXIF/XMP/IPTC metadata writing.
-- Tag translation/override JSON mapping.
-- CUDA and Apple MPS support with CPU fallback.
-- Automatic model checkpoint download and cache validation.
-
-## Installation
-
-### Requirements
+## Requirements
 
 - Python 3.9+
 - `pip`
 - `git` (for source installs)
 
-### Quick Local Install (Recommended)
+## Installation
+
+### Local editable install
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -e .
-photoram --help
+photoram-cli --help
 ```
 
-### Optional Extras
+### Optional extras
 
 ```bash
-# Metadata writing via pyexiv2 fallback
+# Metadata fallback support (pyexiv2)
 pip install -e ".[metadata]"
 
-# Dev and test tools (pytest, pytest-cov)
+# Test tooling
 pip install -e ".[dev]"
-```
-
-### Install as Isolated CLI with pipx
-
-```bash
-pipx install .
 ```
 
 If you use `--write-metadata`, installing `exiftool` is recommended:
@@ -70,89 +53,39 @@ sudo apt install libimage-exiftool-perl
 ## Quick Start
 
 ```bash
-# Tag a single image
-photoram tag photo.jpg
+# Tag one image
+photoram-cli tag photo.jpg
 
 # Include confidence scores
-photoram tag photo.jpg --confidence
+photoram-cli tag photo.jpg --confidence
 
-# Tag a directory recursively
-photoram tag ./photos --recursive
+# Recursive directory tagging
+photoram-cli tag ./photos --recursive
 
-# Faster GPU batch inference
-photoram tag ./photos --recursive --batch-size 8
+# Batch inference (faster on GPU, higher VRAM use)
+photoram-cli tag ./photos --recursive --batch-size 8
 
 # Write metadata
-photoram tag photo.jpg --write-metadata
+photoram-cli tag photo.jpg --write-metadata
 
 # JSON output (always a list)
-photoram tag photo.jpg --format json
+photoram-cli tag photo.jpg --format json
 
-# Tag overrides/translations
-photoram tag photo.jpg --overrides my_overrides.json
+# Print timing summary (model load, tagging, total)
+photoram-cli tag photo.jpg -T
+
+# Show environment/model cache info
+photoram-cli info
 ```
 
-## Output Contract
+Note: first run requires internet access to download the RAM++ checkpoint into the local cache.
 
-### JSON
+## Commands
 
-JSON output is always an array, even for one image.
-
-```json
-[
-  {
-    "file": "photo.jpg",
-    "tags": ["tree", "sky"]
-  }
-]
-```
-
-Add `--confidence` for `confidences`, and `--chinese` for `tags_chinese`.
-
-### Text
-
-For one image, output is a single pipe-separated line:
+### `photoram-cli tag`
 
 ```text
-tree | sky | mountain
-```
-
-For multiple images, output is tab-separated: `<file>\t<tags>`.
-
-### CSV
-
-CSV contains `file` and `tags`, plus optional `confidences` and `tags_chinese`.
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | No images found |
-| 2 | Invalid arguments |
-| 3 | Model error |
-| 4 | Other runtime error |
-
-## Tag Translation
-
-Create `override_labels.json`:
-
-```json
-{
-  "blackbackground": "black background",
-  "art": "kunst",
-  "shadow": "schatten"
-}
-```
-
-Lookup order:
-- Explicit `--overrides <file>`
-- `~/.config/photoram/override_labels.json`
-
-## CLI Reference
-
-```text
-photoram tag [OPTIONS] INPUT...
+photoram-cli tag [OPTIONS] INPUT...
 
 Arguments:
   INPUT                  Image file(s) or directory to tag
@@ -170,15 +103,76 @@ Options:
       --image-size INT   Input image size (default: 384)
       --batch-size INT   Images per inference batch (default: 1)
       --chinese          Also output Chinese tags
+  -T, --timings          Print basic timings (load, tagging, total)
   -q, --quiet            Suppress progress output
-  -h, --help             Show help
+      --help             Show help
 ```
 
-Compatibility alias for photils-dt style calls:
+Compatibility alias for photils-dt-style calls:
 
 ```bash
-photoram tag --image "$FILE"
+photoram-cli tag --image "$FILE"
 ```
+
+### `photoram-cli info`
+
+Prints package version, torch/runtime capability, resolved default device, and model cache information.
+
+## Output Contract
+
+### JSON (`--format json`)
+
+Always returns a list, even for one image.
+
+```json
+[
+  {
+    "file": "photo.jpg",
+    "tags": ["tree", "sky"]
+  }
+]
+```
+
+- Add `--confidence` to include `confidences`.
+- Add `--chinese` to include `tags_chinese`.
+- Failed files include an `error` field.
+
+### Text (`--format text`)
+
+- One image: `tag1 | tag2 | tag3`
+- Multiple images: `<file>\t<tags>` per line
+
+### CSV (`--format csv`)
+
+- Base columns: `file`, `tags`
+- Optional columns: `confidences`, `tags_chinese`
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | No images found |
+| 2 | Invalid arguments |
+| 3 | Model/download/load error |
+| 4 | Other runtime error |
+
+## Tag Overrides
+
+Create `override_labels.json`:
+
+```json
+{
+  "blackbackground": "black background",
+  "art": "kunst",
+  "shadow": "schatten"
+}
+```
+
+Lookup order:
+
+- Explicit `--overrides <file>`
+- `~/.config/photoram/override_labels.json`
 
 ## Architecture
 
@@ -186,33 +180,35 @@ photoram tag --image "$FILE"
 cli.py -> service.py -> model.py
                  \-> utils.py
                  \-> schemas.py
+                 \-> errors.py
+                 \-> metadata.py
 ```
 
-- `src/photoram/cli.py`: Click commands, formatting, exit handling.
-- `src/photoram/service.py`: orchestration layer (load, collect, post-process).
+- `src/photoram/cli.py`: Click commands, progress, output and exit handling.
+- `src/photoram/service.py`: orchestration layer (collection, dispatch, post-processing).
 - `src/photoram/model.py`: RAM++ loading, checkpoint management, inference.
-- `src/photoram/schemas.py`: typed result objects (`TagResult`, `BatchResult`).
+- `src/photoram/schemas.py`: result schemas (`TagResult`, `BatchResult`).
 - `src/photoram/errors.py`: exception hierarchy and exit codes.
 - `src/photoram/metadata.py`: metadata writing adapters.
 - `src/photoram/utils.py`: file discovery, overrides, format helpers.
 
-## Development and Testing
+## Development and Tests
 
 ```bash
 pip install -e ".[dev]"
 pytest
-pytest --cov=photoram
 ```
 
-CLI contract tests live in:
-- `tests/test_cli.py`
-- `tests/test_cli_integration.py`
-
-Run only the CLI-focused tests:
+If running tests without editable install:
 
 ```bash
-pytest tests/test_cli.py tests/test_cli_integration.py
+PYTHONPATH=src pytest
 ```
+
+Main CLI contract tests:
+
+- `tests/test_cli.py`
+- `tests/test_cli_integration.py`
 
 ## License
 
