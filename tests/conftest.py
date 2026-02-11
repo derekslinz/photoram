@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
+
+# Suppress urllib3 SSL warning
+warnings.filterwarnings("ignore", module="urllib3")
 
 
 @pytest.fixture
