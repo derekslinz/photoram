@@ -178,9 +178,6 @@ class TaggingService:
         else:
             # Sequential path (default)
             for idx, img_path in enumerate(image_paths):
-                if on_progress:
-                    on_progress(img_path, idx, total)
-
                 result = mdl.tag_image(img_path)
                 self._post_process(result)
                 results.append(result)
