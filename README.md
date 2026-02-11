@@ -157,6 +157,17 @@ Then restart darktable and run the selected-images action:
 
 - `photoram auto-tag`
 
+Troubleshooting:
+
+1. Check darktable Lua logs for load errors:
+- Linux/macOS: start darktable from terminal and inspect stderr output.
+2. Confirm plugin is in the exact path:
+- `~/.config/darktable/lua/photoram.lua`
+3. Confirm `luarc` contains:
+- `require "photoram"`
+4. If `photoram-cli` is not on PATH, set preference:
+- `photoram: executable` to full binary path (for example `/usr/local/bin/photoram-cli`).
+
 ## Output Contract
 
 ### JSON (`--format json`)

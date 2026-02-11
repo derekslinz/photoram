@@ -115,7 +115,37 @@ local function pref_bool(key, default)
   return v
 end
 
+local function resolve_images(images)
+  if images and #images > 0 then
+    return images
+  end
+  if dt.gui and dt.gui.action_images and #dt.gui.action_images > 0 then
+    return dt.gui.action_images
+  end
+  if dt.gui and dt.gui.selection and #dt.gui.selection() > 0 then
+    return dt.gui.selection()
+  end
+  return {}
+end
+
+local function execute_command(command)
+  if dt.control and dt.control.execute then
+    return dt.control.execute(command)
+  end
+
+  -- Fallback for older darktable/Lua environments.
+  local ok, _, code = os.execute(command)
+  if ok == true then
+    return 0
+  end
+  if type(code) == "number" then
+    return code
+  end
+  return 1
+end
+
 local function run_photoram(images)
+  images = resolve_images(images)
   if not images or #images == 0 then
     dt.print(_("photoram: no images selected"))
     return
@@ -160,7 +190,7 @@ local function run_photoram(images)
     .. " > " .. shell_quote(tmp_out)
     .. " 2> " .. shell_quote(tmp_err)
 
-  local ret = dt.control.execute(command)
+  local ret = execute_command(command)
   if ret ~= 0 then
     local stderr = read_file(tmp_err)
     os.remove(tmp_out)
@@ -212,34 +242,67 @@ local function run_photoram(images)
   ))
 end
 
+local action_registered = false
+local shortcut_registered = false
+
 local function destroy()
-  dt.gui.libs.image.destroy_action(MODULE)
-  dt.destroy_event(MODULE, "shortcut")
+  if action_registered then
+    pcall(function()
+      dt.gui.libs.image.destroy_action(MODULE)
+    end)
+    action_registered = false
+  end
+
+  if shortcut_registered then
+    pcall(function()
+      dt.destroy_event(MODULE, "shortcut")
+    end)
+    shortcut_registered = false
+  end
 end
 
--- Selected images action (multi-image aware)
-dt.gui.libs.image.register_action(
-  MODULE,
-  _("photoram auto-tag"),
-  function(event, images)
-    run_photoram(images)
-  end,
-  _("Run photoram-cli on selected images and attach predicted tags")
-)
+local ok_action, err_action = pcall(function()
+  dt.gui.libs.image.register_action(
+    MODULE,
+    _("photoram auto-tag"),
+    function(event, images)
+      run_photoram(images)
+    end,
+    _("Run photoram-cli on selected images and attach predicted tags")
+  )
+  action_registered = true
+end)
+if not ok_action then
+  dt.print_error(_("photoram: failed to register image action"))
+  dt.print_log("photoram action registration error: " .. tostring(err_action))
+end
 
--- Optional keyboard shortcut action
-dt.register_event(
-  MODULE,
-  "shortcut",
-  function(event, shortcut)
-    run_photoram(dt.gui.action_images)
-  end,
-  _("photoram auto-tag")
-)
+local ok_shortcut, err_shortcut = pcall(function()
+  dt.register_event(
+    MODULE,
+    "shortcut",
+    function(event, shortcut)
+      run_photoram(dt.gui.action_images)
+    end,
+    _("photoram auto-tag")
+  )
+  shortcut_registered = true
+end)
+if not ok_shortcut then
+  dt.print_log("photoram shortcut registration error: " .. tostring(err_shortcut))
+end
 
 -- Preferences
-dt.preferences.register(
-  MODULE,
+local function safe_register_pref(name, pref_type, label, tooltip, default)
+  local ok, err = pcall(function()
+    dt.preferences.register(MODULE, name, pref_type, label, tooltip, default)
+  end)
+  if not ok then
+    dt.print_log("photoram preference registration error (" .. name .. "): " .. tostring(err))
+  end
+end
+
+safe_register_pref(
   "binary_path",
   "string",
   _("photoram: executable"),
@@ -247,8 +310,7 @@ dt.preferences.register(
   "photoram-cli"
 )
 
-dt.preferences.register(
-  MODULE,
+safe_register_pref(
   "max_tags",
   "integer",
   _("photoram: max tags"),
@@ -256,8 +318,7 @@ dt.preferences.register(
   10
 )
 
-dt.preferences.register(
-  MODULE,
+safe_register_pref(
   "threshold_percent",
   "integer",
   _("photoram: threshold (%)"),
@@ -265,8 +326,7 @@ dt.preferences.register(
   80
 )
 
-dt.preferences.register(
-  MODULE,
+safe_register_pref(
   "batch_size",
   "integer",
   _("photoram: batch size"),
@@ -274,8 +334,7 @@ dt.preferences.register(
   32
 )
 
-dt.preferences.register(
-  MODULE,
+safe_register_pref(
   "write_metadata",
   "bool",
   _("photoram: write metadata"),
