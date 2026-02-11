@@ -115,19 +115,19 @@ def main() -> None:
 
 @main.command()
 @click.argument("input_paths", nargs=-1, required=False, metavar="INPUT...")
-@click.option("-t", "--threshold", type=float, default=0.68, show_default=True,
+@click.option("-t", "--threshold", type=float, default=0.80, show_default=True,
               callback=_validate_threshold, expose_value=True, is_eager=True,
               help="Detection threshold (0.0–1.0).")
-@click.option("-n", "--top-n", type=int, default=None,
+@click.option("-n", "--top-n", type=int, default=10,
               callback=_validate_top_n,
               help="Maximum number of tags to return.")
 @click.option("-c", "--confidence", is_flag=True, default=False,
               help="Show confidence scores.")
 @click.option("-f", "--format", "fmt", type=click.Choice(["text", "json", "csv"]),
-              default="text", show_default=True, help="Output format.")
+              default="json", show_default=True, help="Output format.")
 @click.option("-o", "--output", type=click.Path(), default=None,
               help="Write results to file instead of stdout.")
-@click.option("-r", "--recursive", is_flag=True, default=False,
+@click.option("-r", "--recursive", is_flag=True, default=True,
               help="Recursively scan directories.")
 @click.option("-w", "--write-metadata", "write_meta", is_flag=True, default=False,
               help="Write tags to image EXIF/XMP/IPTC metadata.")
@@ -135,14 +135,14 @@ def main() -> None:
               help="Tag override/translation JSON file.")
 @click.option("--device", type=str, default=None,
               help="Force device: cpu, cuda, mps (default: auto).")
-@click.option("--image-size", type=int, default=384, show_default=True,
+@click.option("--image-size", type=int, default=512, show_default=True,
               help="Input image size for the model.")
-@click.option("--batch-size", type=int, default=1, show_default=True,
+@click.option("--batch-size", type=int, default=32, show_default=True,
               callback=_validate_batch_size,
               help="Images per inference batch (higher = faster on GPU, more VRAM).")
-@click.option("--chinese", is_flag=True, default=False,
+@click.option("--chinese", is_flag=False, default=False,
               help="Also output Chinese tags.")
-@click.option("-T", "--timings", is_flag=True, default=False,
+@click.option("-T", "--timings", is_flag=True, default=True,
               help="Print basic timings (load, tagging, total).")
 @click.option("-q", "--quiet", is_flag=True, default=False,
               help="Suppress progress output.")
