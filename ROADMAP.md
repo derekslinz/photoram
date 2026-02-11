@@ -1,6 +1,6 @@
 # photoram Roadmap
 
-## Status Snapshot (v1.0.0)
+## Status Snapshot (v1.0.1)
 
 photoram has moved past the original v0.x hardening phase. The core architecture and CLI contract are now in place and released as stable:
 

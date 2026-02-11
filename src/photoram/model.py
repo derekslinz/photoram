@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import os
 import warnings
 from pathlib import Path
@@ -10,11 +12,13 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
-from .errors import CheckpointCorruptionError, CheckpointDownloadError, ModelError
+from .errors import (
+    CheckpointCorruptionError,
+    CheckpointDownloadError,
+    CheckpointIntegrityError,
+    ModelError,
+)
 from .schemas import TagResult
-
-# Disable PIL's decompression bomb protection for large images
-Image.MAX_IMAGE_PIXELS = None
 
 # Suppress timm deprecation warnings from the RAM package
 warnings.filterwarnings("ignore", category=FutureWarning, module="timm")
@@ -25,18 +29,29 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="timm")
 
 HF_REPO_ID = "xinyu1205/recognize-anything-plus-model"
 HF_FILENAME = "ram_plus_swin_large_14m.pth"
+HF_CHECKPOINT_SHA256 = "497c178836ba66698ca226c7895317e6e800034be986452dbd2593298d50e87d"
 
 DEFAULT_IMAGE_SIZE = 384
 DEFAULT_THRESHOLD = 0.68
 SUPPORTED_IMAGE_SIZES = {224, 384}
 
+DEFAULT_MAX_IMAGE_PIXELS = 120_000_000
+MAX_IMAGE_PIXELS = max(
+    1,
+    int(os.environ.get("PHOTORAM_MAX_IMAGE_PIXELS", DEFAULT_MAX_IMAGE_PIXELS)),
+)
+
 # Minimum reasonable checkpoint size (100 MB) — guards against truncated downloads
 _MIN_CHECKPOINT_BYTES = 100 * 1024 * 1024
+_HASH_CHUNK_SIZE = 1024 * 1024
 
 CACHE_DIR = Path(os.environ.get(
     "PHOTORAM_CACHE",
     Path.home() / ".cache" / "photoram",
 ))
+
+# Keep PIL decompression-bomb protection enabled with an explicit project bound.
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +73,7 @@ class RAMPlusModel:
 
         try:
             self.pretrained_path = pretrained_path or str(self._ensure_checkpoint())
-        except (CheckpointDownloadError, CheckpointCorruptionError):
+        except (CheckpointDownloadError, CheckpointCorruptionError, CheckpointIntegrityError):
             raise
         except Exception as e:
             raise CheckpointDownloadError(
@@ -119,8 +134,45 @@ class RAMPlusModel:
         return torch.device("cpu")
 
     # ------------------------------------------------------------------
-    # Checkpoint download
+    # Checkpoint download & validation
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ensure_cache_dir_permissions() -> None:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        # Best-effort: enforce private cache directory on POSIX systems.
+        with contextlib.suppress(OSError):
+            os.chmod(CACHE_DIR, 0o700)
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        hasher = hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(_HASH_CHUNK_SIZE), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    @staticmethod
+    def _validate_checkpoint(path: Path) -> None:
+        size = path.stat().st_size
+        if size < _MIN_CHECKPOINT_BYTES:
+            raise CheckpointCorruptionError(
+                f"Checkpoint appears corrupted ({size:,} bytes).\n"
+                f"Delete and retry:\n"
+                f"  rm {path}\n"
+                f"  photoram-cli info"
+            )
+
+        actual_sha256 = RAMPlusModel._sha256_file(path)
+        if actual_sha256 != HF_CHECKPOINT_SHA256:
+            raise CheckpointIntegrityError(
+                "Checkpoint integrity verification failed.\n"
+                f"  expected sha256: {HF_CHECKPOINT_SHA256}\n"
+                f"  actual sha256:   {actual_sha256}\n"
+                f"Delete the checkpoint and retry:\n"
+                f"  rm {path}\n"
+                f"  photoram-cli info"
+            )
 
     @staticmethod
     def _ensure_checkpoint() -> Path:
@@ -128,18 +180,10 @@ class RAMPlusModel:
         dest = CACHE_DIR / HF_FILENAME
 
         if dest.exists():
-            # Validate file isn't truncated / corrupted
-            size = dest.stat().st_size
-            if size < _MIN_CHECKPOINT_BYTES:
-                raise CheckpointCorruptionError(
-                    f"Cached checkpoint appears corrupted ({size:,} bytes).\n"
-                    f"Delete and retry:\n"
-                    f"  rm {dest}\n"
-                    f"  photoram-cli info"
-                )
+            RAMPlusModel._validate_checkpoint(dest)
             return dest
 
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        RAMPlusModel._ensure_cache_dir_permissions()
 
         try:
             from huggingface_hub import hf_hub_download
@@ -174,13 +218,12 @@ class RAMPlusModel:
 
         path = Path(downloaded)
 
-        # Post-download validation
-        if path.exists() and path.stat().st_size < _MIN_CHECKPOINT_BYTES:
-            path.unlink(missing_ok=True)
-            raise CheckpointCorruptionError(
-                "Downloaded checkpoint appears truncated. Deleted and retrying may help:\n"
-                f"  photoram-cli info"
-            )
+        try:
+            RAMPlusModel._validate_checkpoint(path)
+        except (CheckpointCorruptionError, CheckpointIntegrityError):
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+            raise
 
         return path
 
@@ -211,6 +254,38 @@ class RAMPlusModel:
         return self._model
 
     # ------------------------------------------------------------------
+    # Image decoding helpers
+    # ------------------------------------------------------------------
+
+    def _load_image_tensor(
+        self,
+        image_path: str | Path,
+    ) -> tuple["torch.Tensor | None", float | None, str | None]:
+        """Decode and transform one image with safety checks.
+
+        Returns:
+            (tensor, megapixels, error_message)
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            try:
+                with Image.open(image_path) as pil_image:
+                    width, height = pil_image.size
+                    total_pixels = width * height
+                    if total_pixels > MAX_IMAGE_PIXELS:
+                        raise Image.DecompressionBombError(
+                            f"Image has {total_pixels:,} pixels; maximum allowed is {MAX_IMAGE_PIXELS:,}."
+                        )
+
+                    image_mp = total_pixels / 1_000_000
+                    tensor = self.transform(pil_image).to(self.device)
+                    return tensor, image_mp, None
+            except (Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
+                return None, None, f"Image rejected for safety: {e}"
+            except Exception as e:
+                return None, None, f"Failed to load image: {e}"
+
+    # ------------------------------------------------------------------
     # Single-image inference
     # ------------------------------------------------------------------
 
@@ -218,21 +293,17 @@ class RAMPlusModel:
         """Run RAM++ on a single image and return tags with confidences."""
         import torch
 
-        try:
-            pil_image = Image.open(image_path)
-            width, height = pil_image.size
-            image_mp = (width * height) / 1_000_000
-            image = self.transform(pil_image).unsqueeze(0).to(self.device)
-        except Exception as e:
+        image, image_mp, error = self._load_image_tensor(image_path)
+        if error is not None or image is None or image_mp is None:
             return TagResult(
                 path=str(image_path),
                 tags=[],
                 confidences=[],
-                error=f"Failed to load image: {e}",
+                error=error or "Failed to load image.",
             )
 
         with torch.no_grad():
-            tags_en, confidences = self._inference_with_confidence(image)
+            tags_en, confidences = self._inference_with_confidence(image.unsqueeze(0))
 
         return TagResult(
             path=str(image_path),
@@ -252,60 +323,65 @@ class RAMPlusModel:
     ) -> list[TagResult]:
         """Run RAM++ on multiple images with optional batching.
 
-        Args:
-            image_paths: List of image file paths.
-            batch_size: Number of images to process per forward pass.
-                        Larger batches are faster on GPU but use more memory.
-
-        Returns:
-            List of TagResult, one per input image (order preserved).
+        This implementation streams image decoding in mini-batches to keep
+        memory usage bounded by ``batch_size``.
         """
         import torch
 
-        # Pre-load and transform all images, tracking failures
-        loaded: list[tuple[int, "torch.Tensor", float]] = []
-        failed: list[tuple[int, TagResult]] = []
+        indexed_results: list[tuple[int, TagResult]] = []
+        pending_indices: list[int] = []
+        pending_tensors: list["torch.Tensor"] = []
+        pending_megapixels: list[float] = []
 
-        for idx, img_path in enumerate(image_paths):
-            try:
-                pil_image = Image.open(img_path)
-                width, height = pil_image.size
-                image_mp = (width * height) / 1_000_000
-                tensor = self.transform(pil_image).to(self.device)
-                loaded.append((idx, tensor, image_mp))
-            except Exception as e:
-                failed.append((idx, TagResult(
-                    path=str(img_path),
-                    tags=[],
-                    tags_chinese=[],
-                    confidences=[],
-                    error=f"Failed to load image: {e}",
-                )))
+        def _flush_batch() -> None:
+            if not pending_tensors:
+                return
 
-        # Process in batches
-        batch_results: list[tuple[int, TagResult]] = []
-        for batch_start in range(0, len(loaded), batch_size):
-            batch = loaded[batch_start:batch_start + batch_size]
-            indices = [idx for idx, _, _ in batch]
-            megapixels = [mp for _, _, mp in batch]
-            tensors = torch.stack([t for _, t, _ in batch]).to(self.device)
-
+            tensors = torch.stack(pending_tensors).to(self.device)
             with torch.no_grad():
                 batch_tags = self._batch_inference_with_confidence(tensors)
 
-            for i, (tags_en, tags_zh, confs) in enumerate(batch_tags):
-                batch_results.append((indices[i], TagResult(
-                    path=str(image_paths[indices[i]]),
-                    tags=tags_en,
-                    tags_chinese=tags_zh,
-                    confidences=confs,
-                    image_megapixels=megapixels[i],
-                )))
+            for pos, (tags_en, confs) in enumerate(batch_tags):
+                src_idx = pending_indices[pos]
+                indexed_results.append((
+                    src_idx,
+                    TagResult(
+                        path=str(image_paths[src_idx]),
+                        tags=tags_en,
+                        confidences=confs,
+                        image_megapixels=pending_megapixels[pos],
+                    ),
+                ))
 
-        # Merge and sort by original index
-        all_indexed = batch_results + failed
-        all_indexed.sort(key=lambda x: x[0])
-        return [r for _, r in all_indexed]
+            pending_indices.clear()
+            pending_tensors.clear()
+            pending_megapixels.clear()
+
+        for idx, img_path in enumerate(image_paths):
+            tensor, image_mp, error = self._load_image_tensor(img_path)
+            if error is not None or tensor is None or image_mp is None:
+                indexed_results.append((
+                    idx,
+                    TagResult(
+                        path=str(img_path),
+                        tags=[],
+                        confidences=[],
+                        error=error or "Failed to load image.",
+                    ),
+                ))
+                continue
+
+            pending_indices.append(idx)
+            pending_tensors.append(tensor)
+            pending_megapixels.append(image_mp)
+
+            if len(pending_tensors) >= batch_size:
+                _flush_batch()
+
+        _flush_batch()
+
+        indexed_results.sort(key=lambda x: x[0])
+        return [result for _, result in indexed_results]
 
     # ------------------------------------------------------------------
     # Core inference (single image tensor)

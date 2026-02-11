@@ -205,5 +205,4 @@ class TaggingService:
         # Top-N limit
         if self.top_n:
             result.tags = result.tags[: self.top_n]
-            result.tags_chinese = result.tags_chinese[: self.top_n]
             result.confidences = result.confidences[: self.top_n]

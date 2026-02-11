@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "photoram"
-version = "1.0.0"
+version = "1.0.1"
 description = "Modern CLI photo tagger powered by RAM++ (Recognize Anything Model)"
 readme = "README.md"
 license = "MIT"

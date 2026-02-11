@@ -8,6 +8,7 @@ from photoram.errors import (
     EXIT_NO_IMAGES,
     EXIT_SUCCESS,
     CheckpointDownloadError,
+    CheckpointIntegrityError,
     ModelError,
     NoImagesError,
     PhotoramError,
@@ -39,6 +40,11 @@ class TestExceptions:
 
     def test_checkpoint_download_inherits_model_error(self) -> None:
         e = CheckpointDownloadError("network fail")
+        assert isinstance(e, ModelError)
+        assert isinstance(e, PhotoramError)
+
+    def test_checkpoint_integrity_inherits_model_error(self) -> None:
+        e = CheckpointIntegrityError("hash mismatch")
         assert isinstance(e, ModelError)
         assert isinstance(e, PhotoramError)
 

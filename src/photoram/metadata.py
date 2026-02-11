@@ -32,6 +32,8 @@ def write_metadata_exiftool(image_path: str | Path, tags: list[str]) -> None:
     for tag in tags:
         args.append(f"-IPTC:Keywords={tag}")
         args.append(f"-XMP:Subject={tag}")
+    # `--` prevents filenames beginning with '-' from being parsed as options.
+    args.append("--")
     args.append(str(image_path))
 
     try:

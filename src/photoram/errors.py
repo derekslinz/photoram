@@ -54,5 +54,9 @@ class CheckpointCorruptionError(ModelError):
     """Downloaded checkpoint appears corrupted."""
 
 
+class CheckpointIntegrityError(ModelError):
+    """Downloaded checkpoint failed integrity verification."""
+
+
 class MetadataWriteError(PhotoramError):
     """Failed to write metadata to one or more images."""
