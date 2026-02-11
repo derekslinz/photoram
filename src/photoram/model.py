@@ -8,9 +8,13 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from PIL import Image
 
 from .errors import CheckpointCorruptionError, CheckpointDownloadError, ModelError
 from .schemas import TagResult
+
+# Disable PIL's decompression bomb protection for large images
+Image.MAX_IMAGE_PIXELS = None
 
 # Suppress timm deprecation warnings from the RAM package
 warnings.filterwarnings("ignore", category=FutureWarning, module="timm")
@@ -192,10 +196,12 @@ class RAMPlusModel:
     def tag_image(self, image_path: str | Path) -> TagResult:
         """Run RAM++ on a single image and return tags with confidences."""
         import torch
-        from PIL import Image
 
         try:
-            image = self.transform(Image.open(image_path)).unsqueeze(0).to(self.device)
+            pil_image = Image.open(image_path)
+            width, height = pil_image.size
+            image_mp = (width * height) / 1_000_000
+            image = self.transform(pil_image).unsqueeze(0).to(self.device)
         except Exception as e:
             return TagResult(
                 path=str(image_path),
@@ -213,6 +219,7 @@ class RAMPlusModel:
             tags=tags_en,
             tags_chinese=tags_zh,
             confidences=confidences,
+            image_megapixels=image_mp,
         )
 
     # ------------------------------------------------------------------
@@ -235,16 +242,18 @@ class RAMPlusModel:
             List of TagResult, one per input image (order preserved).
         """
         import torch
-        from PIL import Image
 
         # Pre-load and transform all images, tracking failures
-        loaded: list[tuple[int, "torch.Tensor"]] = []
+        loaded: list[tuple[int, "torch.Tensor", float]] = []
         failed: list[tuple[int, TagResult]] = []
 
         for idx, img_path in enumerate(image_paths):
             try:
-                tensor = self.transform(Image.open(img_path)).to(self.device)
-                loaded.append((idx, tensor))
+                pil_image = Image.open(img_path)
+                width, height = pil_image.size
+                image_mp = (width * height) / 1_000_000
+                tensor = self.transform(pil_image).to(self.device)
+                loaded.append((idx, tensor, image_mp))
             except Exception as e:
                 failed.append((idx, TagResult(
                     path=str(img_path),
@@ -258,8 +267,9 @@ class RAMPlusModel:
         batch_results: list[tuple[int, TagResult]] = []
         for batch_start in range(0, len(loaded), batch_size):
             batch = loaded[batch_start:batch_start + batch_size]
-            indices = [idx for idx, _ in batch]
-            tensors = torch.stack([t for _, t in batch]).to(self.device)
+            indices = [idx for idx, _, _ in batch]
+            megapixels = [mp for _, _, mp in batch]
+            tensors = torch.stack([t for _, t, _ in batch]).to(self.device)
 
             with torch.no_grad():
                 batch_tags = self._batch_inference_with_confidence(tensors)
@@ -270,6 +280,7 @@ class RAMPlusModel:
                     tags=tags_en,
                     tags_chinese=tags_zh,
                     confidences=confs,
+                    image_megapixels=megapixels[i],
                 )))
 
         # Merge and sort by original index

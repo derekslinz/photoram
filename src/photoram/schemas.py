@@ -18,6 +18,7 @@ class TagResult:
     tags_chinese: list[str] = field(default_factory=list)
     confidences: list[float] = field(default_factory=list)
     error: Optional[str] = None
+    image_megapixels: Optional[float] = None
 
     @property
     def success(self) -> bool:

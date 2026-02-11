@@ -292,7 +292,16 @@ def tag(
 
     if timings:
         total_time = time.perf_counter() - total_start
-        _print_timings(load_time=load_time, tag_time=tag_time, total_time=total_time)
+        num_images = len(batch.results)
+        total_mp = sum(r.image_megapixels or 0 for r in batch.results)
+        avg_megapixels = total_mp / num_images if num_images > 0 else 0
+        _print_timings(
+            load_time=load_time,
+            tag_time=tag_time,
+            total_time=total_time,
+            num_images=num_images,
+            avg_megapixels=avg_megapixels,
+        )
 
     raise SystemExit(EXIT_SUCCESS)
 
@@ -383,12 +392,21 @@ class _nullcontext:
         pass
 
 
-def _print_timings(load_time: float, tag_time: float, total_time: float) -> None:
+def _print_timings(
+    load_time: float,
+    tag_time: float,
+    total_time: float,
+    num_images: int,
+    avg_megapixels: float,
+) -> None:
     """Print a compact timing summary to stderr."""
     console.print("[dim]Timings:[/dim]")
     console.print(f"[dim]  model load:[/dim] {load_time:.3f}s")
     console.print(f"[dim]  tagging:[/dim] {tag_time:.3f}s")
     console.print(f"[dim]  total:[/dim] {total_time:.3f}s")
+    console.print(f"[dim]  images:[/dim] {num_images}")
+    if avg_megapixels > 0:
+        console.print(f"[dim]  avg megapixels:[/dim] {avg_megapixels:.1f} MP")
 
 
 @contextlib.contextmanager
