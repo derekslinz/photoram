@@ -9,6 +9,7 @@
 - Standardized exit codes and clearer validation errors.
 - Service-layer architecture (`TaggingService`) separating CLI and model logic.
 - Expanded automated CLI coverage in `tests/test_cli.py` and `tests/test_cli_integration.py`.
+- photils-cli compatibility flags: `--image`, `--output_file`, `--with_confidence`.
 
 ## Features
 
@@ -37,6 +38,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -e .
+photoram --help
 ```
 
 ### Optional Extras
@@ -205,6 +207,12 @@ pytest --cov=photoram
 CLI contract tests live in:
 - `tests/test_cli.py`
 - `tests/test_cli_integration.py`
+
+Run only the CLI-focused tests:
+
+```bash
+pytest tests/test_cli.py tests/test_cli_integration.py
+```
 
 ## License
 

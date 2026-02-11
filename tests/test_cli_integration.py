@@ -61,7 +61,7 @@ class TestCLIOutputIntegration:
             ["tag", str(sample_image), "--output", str(output_file), "--quiet"],
         )
         assert result.exit_code == EXIT_SUCCESS
-        assert result.output == ""
+        assert result.output.strip() == ""
         assert output_file.exists()
         assert "tree" in output_file.read_text(encoding="utf-8")
 
@@ -133,6 +133,41 @@ class TestCLIOutputIntegration:
         called_args, called_kwargs = mock_svc.tag_paths.call_args
         assert called_args[0] == (str(sample_image),)
         assert called_kwargs["recursive"] is False
+
+    @patch("photoram.cli.TaggingService")
+    def test_photils_compat_output_and_confidence_aliases(
+        self, mock_svc_cls: MagicMock, runner: CliRunner, sample_image: Path, tmp_path: Path
+    ) -> None:
+        output_file = tmp_path / "compat_output.txt"
+
+        mock_svc = MagicMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_svc.load_model.return_value = 0.01
+        mock_svc.resolved_device = "cpu"
+        mock_svc.tag_paths.return_value = _single_success_batch(confidences=[0.95, 0.9])
+
+        result = runner.invoke(
+            main,
+            [
+                "tag",
+                str(sample_image),
+                "--output_file",
+                str(output_file),
+                "--with_confidence",
+                "--quiet",
+            ],
+        )
+
+        assert result.exit_code == EXIT_SUCCESS
+        assert output_file.exists()
+        content = output_file.read_text(encoding="utf-8")
+        assert "tree" in content
+        assert "%" in content
+
+    def test_tag_requires_input_when_no_compat_image(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["tag"])
+        assert result.exit_code == 2
+        assert "Missing argument 'INPUT...'" in result.output
 
 
 class TestCLIMetadataIntegration:

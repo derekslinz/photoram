@@ -92,7 +92,7 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 
 @main.command()
-@click.argument("input_paths", nargs=-1, required=True, metavar="INPUT...")
+@click.argument("input_paths", nargs=-1, required=False, metavar="INPUT...")
 @click.option("-t", "--threshold", type=float, default=0.68, show_default=True,
               callback=_validate_threshold, expose_value=True, is_eager=True,
               help="Detection threshold (0.0–1.0).")
@@ -167,6 +167,8 @@ def tag(
         output = compat_output
     if compat_conf:
         confidence = True
+    if not input_paths:
+        raise click.UsageError("Missing argument 'INPUT...'.")
 
     # ---- Build service ----
     try:
