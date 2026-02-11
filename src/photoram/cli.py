@@ -136,7 +136,7 @@ def main() -> None:
               help="Tag override/translation JSON file.")
 @click.option("--device", type=str, default=None, hidden=True,
               help="Force device: cpu, cuda, mps (default: auto).")
-@click.option("--batch-size", type=int, default=32, show_default=True,
+@click.option("--batch-size", type=int, default=16, show_default=True,
               callback=_validate_batch_size,
               help="Images per inference batch (higher = faster on GPU, more VRAM).")
 @click.option("-T", "--timings", is_flag=True, default=False,

@@ -4,6 +4,13 @@
 
 Reduce high-impact security risk in model loading and image processing paths while preserving CLI usability and current output contracts.
 
+## Implementation Status
+
+- Phase 1: Completed
+- Phase 2: Completed
+- Phase 3: Completed
+- Validation: Completed (`pytest` passing locally)
+
 ## Scope
 
 This plan covers these findings from the latest security review:
@@ -26,14 +33,14 @@ This plan covers these findings from the latest security review:
 1. Harden metadata subprocess invocation for untrusted filenames.
 2. Stream batch loading to avoid unbounded memory growth.
 
-### P3 (Planned)
+### P3 (Completed)
 
 1. Add dependency and static security checks to CI.
 2. Tighten dependency pinning strategy with reproducible installs.
 
 ## Work Plan
 
-## Phase 1: Critical Controls (Target: next patch release)
+## Phase 1: Critical Controls (Implemented)
 
 ### Task 1: Checkpoint integrity enforcement
 
@@ -81,7 +88,7 @@ Acceptance criteria:
 2. Result for affected image includes failure reason; batch continues.
 3. Normal large photos under threshold still process successfully.
 
-## Phase 2: Abuse Resistance (Target: next minor release)
+## Phase 2: Abuse Resistance (Implemented)
 
 ### Task 3: exiftool argument hardening
 
@@ -122,7 +129,7 @@ Acceptance criteria:
 2. Output order and schema remain unchanged.
 3. No regression in existing CLI tests.
 
-## Phase 3: Supply Chain & Continuous Assurance (Target: next minor release)
+## Phase 3: Supply Chain & Continuous Assurance (Implemented)
 
 ### Task 5: Dependency and SAST controls in CI
 
@@ -181,3 +188,5 @@ Acceptance criteria:
 2. CI includes security scanning and passes on main.
 3. README/ROADMAP updated to reflect implemented protections.
 4. No regressions in CLI contract tests.
+
+Status: All criteria implemented in this repository update.

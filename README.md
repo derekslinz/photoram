@@ -6,11 +6,19 @@
 
 - RAM++ tagging with 4,585+ open-set labels.
 - Offline inference after first-run checkpoint download.
-- Batch inference (`--batch-size`) for better GPU throughput.
+- Batch inference (`--batch-size`) with streaming mini-batch loading.
 - Stable JSON output contract: `--format json` always returns a list.
 - Standardized exit codes and validation errors.
 - Service-layer architecture (`TaggingService`) that decouples CLI from model internals.
 - photils compatibility flags: `--image`, `--output_file`, `--with_confidence`.
+
+## Security Hardening
+
+- Checkpoint integrity verification: RAM++ checkpoint is SHA-256 validated before model load.
+- Image safety checks: decompression-bomb protection is enabled (`PHOTORAM_MAX_IMAGE_PIXELS`, default `120000000`).
+- Metadata subprocess hardening: exiftool invocation uses `--` before image path to prevent option parsing.
+- Streaming batch loader: avoids preloading all tensors for large jobs.
+- CI security gates: `bandit` (SAST) and `pip-audit` (dependency CVEs).
 
 ## Requirements
 
@@ -30,14 +38,20 @@ pip install -e .
 photoram-cli --help
 ```
 
+### Reproducible install (constraints)
+
+```bash
+pip install -c constraints.txt -e .
+```
+
 ### Optional extras
 
 ```bash
 # Metadata fallback support (pyexiv2)
 pip install -e ".[metadata]"
 
-# Test tooling
-pip install -e ".[dev]"
+# Dev + test + security tooling
+pip install -c constraints.txt -e ".[dev]"
 ```
 
 If you use `--write-metadata`, installing `exiftool` is recommended:
@@ -63,7 +77,7 @@ photoram-cli tag photo.jpg --confidence
 photoram-cli tag ./photos --recursive
 
 # Batch inference (faster on GPU, higher VRAM use)
-photoram-cli tag ./photos --recursive --batch-size 8
+photoram-cli tag ./photos --recursive --batch-size 32
 
 # Write metadata
 photoram-cli tag photo.jpg --write-metadata
@@ -91,19 +105,18 @@ Arguments:
   INPUT                  Image file(s) or directory to tag
 
 Options:
-  -t, --threshold FLOAT  Detection threshold 0.0-1.0 (default: 0.68)
+  -t, --threshold FLOAT  Detection threshold 0.0-1.0 (default: 0.8)
   -n, --top-n INTEGER    Maximum number of tags to return
   -c, --confidence       Show confidence scores
-  -f, --format FORMAT    Output format: text, json, csv (default: text)
+  -f, --format FORMAT    Output format: text, json, csv (default: json)
   -o, --output FILE      Write results to file
   -r, --recursive        Recursively scan directories
-      -w, --write-metadata   Write tags to image EXIF/XMP/IPTC metadata
+  -w, --write-metadata   Write tags to image EXIF/XMP/IPTC metadata
       --overrides FILE   Tag override/translation JSON file
-      --batch-size INT   Images per inference batch (default: 1)
-      --chinese          Also output Chinese tags
+      --batch-size INT   Images per inference batch (default: 32)
   -T, --timings          Print basic timings (load, tagging, total)
   -q, --quiet            Suppress progress output
-      --help             Show help
+  -h, --help             Show help
 ```
 
 Compatibility alias for photils-dt-style calls:
@@ -132,7 +145,6 @@ Always returns a list, even for one image.
 ```
 
 - Add `--confidence` to include `confidences`.
-- Add `--chinese` to include `tags_chinese`.
 - Failed files include an `error` field.
 
 ### Text (`--format text`)
@@ -143,7 +155,7 @@ Always returns a list, even for one image.
 ### CSV (`--format csv`)
 
 - Base columns: `file`, `tags`
-- Optional columns: `confidences`, `tags_chinese`
+- Optional columns: `confidences`
 
 ## Exit Codes
 
@@ -184,7 +196,7 @@ cli.py -> service.py -> model.py
 
 - `src/photoram/cli.py`: Click commands, progress, output and exit handling.
 - `src/photoram/service.py`: orchestration layer (collection, dispatch, post-processing).
-- `src/photoram/model.py`: RAM++ loading, checkpoint management, inference.
+- `src/photoram/model.py`: RAM++ loading, checkpoint management, inference, safety checks.
 - `src/photoram/schemas.py`: result schemas (`TagResult`, `BatchResult`).
 - `src/photoram/errors.py`: exception hierarchy and exit codes.
 - `src/photoram/metadata.py`: metadata writing adapters.
@@ -193,14 +205,15 @@ cli.py -> service.py -> model.py
 ## Development and Tests
 
 ```bash
-pip install -e ".[dev]"
+pip install -c constraints.txt -e ".[dev]"
 pytest
 ```
 
-If running tests without editable install:
+Security scans:
 
 ```bash
-PYTHONPATH=src pytest
+bandit -q -r src
+pip-audit
 ```
 
 Main CLI contract tests:

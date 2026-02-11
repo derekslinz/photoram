@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import types
 import warnings
 from pathlib import Path
@@ -86,7 +87,7 @@ def test_ensure_checkpoint_deletes_bad_download(
         return str(downloaded_path)
 
     fake_hf_hub.hf_hub_download = _fake_download
-    monkeypatch.setitem(__import__("sys").modules, "huggingface_hub", fake_hf_hub)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf_hub)
 
     with pytest.raises(CheckpointIntegrityError):
         RAMPlusModel._ensure_checkpoint()
@@ -129,3 +130,51 @@ def test_validate_checkpoint_accepts_matching_hash(
 
     # Should not raise.
     RAMPlusModel._validate_checkpoint(candidate)
+
+
+def test_tag_images_streams_by_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = RAMPlusModel.__new__(RAMPlusModel)
+    model.device = "cpu"
+
+    class _DummyTensor:
+        def to(self, _device):
+            return self
+
+    class _Stacked:
+        def __init__(self, tensors):
+            self.tensors = tensors
+
+        def to(self, _device):
+            return self
+
+    class _NoGrad:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_torch = types.SimpleNamespace(
+        stack=lambda tensors: _Stacked(tensors),
+        no_grad=lambda: _NoGrad(),
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    paths = [f"img_{i}.jpg" for i in range(5)]
+
+    def _load(_path):
+        return _DummyTensor(), 1.0, None
+
+    batch_sizes: list[int] = []
+
+    def _infer(stacked):
+        batch_sizes.append(len(stacked.tensors))
+        return [(["tag"], [0.99]) for _ in stacked.tensors]
+
+    model._load_image_tensor = _load  # type: ignore[assignment]
+    model._batch_inference_with_confidence = _infer  # type: ignore[assignment]
+
+    results = model.tag_images(paths, batch_size=2)
+
+    assert batch_sizes == [2, 2, 1]
+    assert [r.path for r in results] == paths

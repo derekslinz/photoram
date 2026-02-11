@@ -1,90 +1,63 @@
 # photoram Roadmap
 
-## Status Snapshot (v1.0.1)
+## Status Snapshot (v1.1.0)
 
-photoram has moved past the original v0.x hardening phase. The core architecture and CLI contract are now in place and released as stable:
+Security and resilience phases from the remediation plan are implemented.
 
-- Service-layer architecture is implemented (`cli.py -> service.py -> model.py`).
-- JSON output contract is stable (always a list).
-- CLI input validation and standardized exit codes are implemented.
-- Batch inference (`--batch-size`) is implemented.
-- Custom error hierarchy and clearer diagnostics are implemented.
-- Automated tests for CLI/utils/schemas/errors are present.
-- RAM dependency is pinned to a commit in `pyproject.toml`.
+Completed:
 
-## What Is Already Complete
+1. Checkpoint integrity verification (SHA-256, fail closed).
+2. Decompression-bomb protection with configurable pixel cap.
+3. exiftool argument hardening (`--` before filename).
+4. Streaming mini-batch inference (bounded memory by batch size).
+5. Fresh-clone test ergonomics (`pytest` works without editable install path tweaks).
+6. CI automation for tests, SAST (`bandit`), and dependency audit (`pip-audit`).
+7. Constraints-based reproducible install path (`constraints.txt`).
 
-### Completed from the original roadmap
+## Remaining Focus Areas
 
-1. CLI contract hardening (validation + deterministic output).
-2. Runtime error model (typed exceptions + exit-code mapping).
-3. Service-layer refactor and schema formalization.
-4. Initial reliability improvements for checkpoint handling.
-5. Core unit/integration test suite for CLI contracts.
+1. Add benchmark suite and baseline throughput metrics (CPU/CUDA/MPS).
+2. Define release checklist (changelog, docs sync, security scan review).
+3. Improve contributor guidance for dependency updates and vulnerability triage.
 
-## Current Gaps
+## Near-Term Milestones
 
-1. Test ergonomics from a fresh clone: `pytest` fails unless package is installed editable (or `PYTHONPATH=src` is set).
-2. Batch inference currently preloads all transformed images before running mini-batches, which can spike memory on very large sets.
-3. Performance benchmarks and regression thresholds are not yet formalized.
-4. CI/release automation is not documented in-repo.
-5. Output docs should continue to track edge-case behavior (especially partial failures).
-
-## Forward Roadmap
-
-## Milestone 1: Operational Quality (v1.1.x)
+## Milestone A: Performance Benchmarking (v1.2.x)
 
 Scope:
 
-- Make local test runs deterministic without requiring prior editable install.
-- Expand documentation for first-run model download and failure modes.
-- Add tests for partial-failure output behavior and metadata warning paths.
+- Add reproducible benchmark fixture set.
+- Capture baseline images/min and memory profiles by device class.
+- Track regressions in CI or scheduled jobs.
 
 Exit Criteria:
 
-- `pytest` succeeds in a clean clone with documented one-command setup.
-- README accurately reflects current command and output behavior.
-- Partial-failure behavior is covered by integration tests.
+- Benchmarks are documented and repeatable.
+- Performance regression threshold is defined.
 
-## Milestone 2: Performance at Scale (v1.2.x)
+## Milestone B: Release Operations (v1.3.x)
 
 Scope:
 
-- Refactor batch path to stream/load per batch instead of preloading all tensors.
-- Add benchmark fixtures and baseline throughput metrics (CPU/CUDA/MPS).
-- Tune batch defaults and document tradeoffs.
+- Add release checklist and security sign-off process.
+- Document dependency update cadence and audit workflow.
+- Improve failure triage playbook for model download/integrity incidents.
 
 Exit Criteria:
 
-- Large directory runs avoid unbounded memory growth.
-- Measured throughput improvements are documented.
-- No regressions in tagging correctness/output contracts.
-
-## Milestone 3: Delivery & Release Discipline (v1.3.x)
-
-Scope:
-
-- Add/standardize CI checks for tests and packaging sanity.
-- Define release checklist (tests, changelog, docs alignment).
-- Improve contributor workflow documentation.
-
-Exit Criteria:
-
-- CI is green and enforced on mainline changes.
-- Releases follow a repeatable checklist.
-- Contributor setup is documented and reproducible.
+- Releases follow a standard checklist.
+- Security scans and test gates are reviewed before release.
 
 ## Success Metrics
 
 - Reliability: valid invocations complete without unexpected crashes.
-- Contract stability: no breaking output changes without versioned notice.
-- Performance: improved images/minute and bounded memory on large batches.
-- Developer UX: fresh-clone test run succeeds with documented steps.
-- Maintainability: core behavior covered by tests and CI.
+- Contract stability: output schema remains backward-compatible by default.
+- Security: integrity and scan controls remain green in CI.
+- Performance: bounded memory and improving throughput on large batches.
+- Developer UX: clean-clone setup and tests are reproducible.
 
 ## Immediate Next Actions
 
-1. Address test bootstrap ergonomics (editable install vs source-path strategy).
-2. Rework `model.tag_images` to avoid preloading every image into memory.
-3. Add benchmark script + baseline numbers to the repo.
-4. Keep README and ROADMAP updated per release changes.
+1. Add benchmark harness and representative dataset fixture.
+2. Add release checklist document in repo.
+3. Document dependency patching + CVE triage workflow.
