@@ -65,7 +65,7 @@ Place it at `~/.config/photoram/override_labels.json` or pass it with `--overrid
 
 ## CLI Reference
 
-```
+```text
 photoram tag [OPTIONS] INPUT...
 
 Arguments:

@@ -20,8 +20,6 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-from rich.table import Table
-
 from . import __version__
 from .metadata import write_metadata
 from .model import RAMPlusModel, TagResult
@@ -125,7 +123,7 @@ def tag(
 
     # ---- Load model ----
     if not quiet:
-        console.print(f"[dim]Device:[/dim] auto-detect" if device is None else f"[dim]Device:[/dim] {device}")
+        console.print("[dim]Device:[/dim] auto-detect" if device is None else f"[dim]Device:[/dim] {device}")
         console.print(f"[dim]Threshold:[/dim] {threshold}")
         console.print(f"[dim]Images:[/dim] {len(images)}")
         console.print()
