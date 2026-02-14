@@ -16,13 +16,13 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from .errors import NoImagesError, ValidationError
-from .model import RAMPlusModel
+from .model import DEFAULT_TOP_K, ImageNet21KModel
 from .schemas import BatchResult, TagResult
 from .utils import apply_overrides, collect_images, load_overrides
 
 
 class TaggingService:
-    """High-level tagging orchestrator.
+    """High-level image classification orchestrator.
 
     Usage::
 
@@ -35,9 +35,9 @@ class TaggingService:
 
     def __init__(
         self,
-        threshold: float = 0.68,
+        threshold: float = 0.0,
         device: Optional[str] = None,
-        image_size: int = 384,
+        image_size: int = 224,
         top_n: Optional[int] = None,
         overrides: Optional[str] = None,
         batch_size: int = 1,
@@ -55,7 +55,7 @@ class TaggingService:
 
         self.override_map = load_overrides(overrides)
 
-        self._model: Optional[RAMPlusModel] = None
+        self._model: Optional[ImageNet21KModel] = None
         self._load_time: float = 0.0
 
     # ------------------------------------------------------------------
@@ -88,19 +88,22 @@ class TaggingService:
     # ------------------------------------------------------------------
 
     def load_model(self) -> float:
-        """Load (or warm up) the RAM++ model.
+        """Load (or warm up) the ImageNet-21K model.
 
         Returns:
             Wall-clock seconds the model load took.
 
         Raises:
-            ModelError: on any model/checkpoint failure.
+            ModelError: on any model loading or inference failure.
         """
         t0 = time.time()
-        self._model = RAMPlusModel(
+        model_top_k = self.top_n if self.top_n is not None else DEFAULT_TOP_K
+
+        self._model = ImageNet21KModel(
             device=self.device,
             image_size=self.image_size,
             threshold=self.threshold,
+            top_k=model_top_k,
         )
         # Force the lazy model property to materialise
         _ = self._model.model
@@ -108,7 +111,7 @@ class TaggingService:
         return self._load_time
 
     @property
-    def model(self) -> RAMPlusModel:
+    def model(self) -> ImageNet21KModel:
         if self._model is None:
             self.load_model()
         return self._model
@@ -166,24 +169,33 @@ class TaggingService:
         mdl = self.model
         total = len(image_paths)
         results: list[TagResult] = []
+        processed = 0
+
+        if on_progress and total > 0:
+            # Initialize the progress task with a known total before inference starts.
+            on_progress(Path(image_paths[0]), 0, total)
 
         if self.batch_size > 1:
-            # Batch inference path
-            raw_results = mdl.tag_images(list(image_paths), batch_size=self.batch_size)
-            for idx, result in enumerate(raw_results):
-                self._post_process(result)
-                results.append(result)
-                if on_progress:
-                    on_progress(Path(result.path), idx + 1, total)
+            # Chunked batch path: keeps memory bounded and emits progress as work completes.
+            for start in range(0, total, self.batch_size):
+                chunk = list(image_paths[start: start + self.batch_size])
+                raw_results = mdl.tag_images(chunk, batch_size=self.batch_size)
+                for result in raw_results:
+                    self._post_process(result)
+                    results.append(result)
+                    processed += 1
+                    if on_progress:
+                        on_progress(Path(result.path), processed, total)
         else:
             # Sequential path (default)
-            for idx, img_path in enumerate(image_paths):
+            for img_path in image_paths:
                 result = mdl.tag_image(img_path)
                 self._post_process(result)
                 results.append(result)
+                processed += 1
 
                 if on_progress:
-                    on_progress(img_path, idx + 1, total)
+                    on_progress(img_path, processed, total)
 
         return BatchResult(results=results)
 

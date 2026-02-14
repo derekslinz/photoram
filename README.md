@@ -1,11 +1,11 @@
 # photoram
 
-`photoram` is a CLI photo tagger powered by RAM++ (Recognize Anything Model Plus Plus). It is designed as a modern, scriptable successor to [photils-cli](https://github.com/scheckmedia/photils-cli). The installed command is `photoram-cli`.
+`photoram` is a CLI photo classifier powered by ImageNet-21K. It is designed as a modern, scriptable successor to [photils-cli](https://github.com/scheckmedia/photils-cli). The installed command is `photoram-cli`.
 
 ## Highlights
 
-- RAM++ tagging with 4,585+ open-set labels.
-- Offline inference after first-run checkpoint download.
+- ImageNet-21K classification with 21k-class label space.
+- Offline inference after first-run model download.
 - Batch inference (`--batch-size`) with streaming mini-batch loading.
 - Stable JSON output contract: `--format json` always returns a list.
 - Standardized exit codes and validation errors.
@@ -14,7 +14,7 @@
 
 ## Security Hardening
 
-- Checkpoint integrity verification: RAM++ checkpoint is SHA-256 validated before model load.
+- Deterministic model selection: pinned default model id (`google/vit-base-patch16-224-in21k`).
 - Image safety checks: decompression-bomb protection is enabled (`PHOTORAM_MAX_IMAGE_PIXELS`, default `120000000`).
 - Metadata subprocess hardening: exiftool invocation uses `--` before image path to prevent option parsing.
 - Streaming batch loader: avoids preloading all tensors for large jobs.
@@ -92,7 +92,7 @@ photoram-cli tag photo.jpg -T
 photoram-cli info
 ```
 
-Note: first run requires internet access to download the RAM++ checkpoint into the local cache.
+Note: first run requires internet access to download the ImageNet-21K model into the Hugging Face cache.
 
 ## Commands
 
@@ -105,7 +105,7 @@ Arguments:
   INPUT                  Image file(s) or directory to tag
 
 Options:
-  -t, --threshold FLOAT  Detection threshold 0.0-1.0 (default: 0.8)
+  -t, --threshold FLOAT  Minimum class probability 0.0-1.0 (default: 0.0)
   -n, --top-n INTEGER    Maximum number of tags to return
   -c, --confidence       Show confidence scores
   -f, --format FORMAT    Output format: text, json, csv (default: json)
@@ -113,7 +113,7 @@ Options:
   -r, --recursive        Recursively scan directories
   -w, --write-metadata   Write tags to image EXIF/XMP/IPTC metadata
       --overrides FILE   Tag override/translation JSON file
-      --batch-size INT   Images per inference batch (default: 32)
+      --batch-size INT   Images per inference batch (default: 16)
   -T, --timings          Print basic timings (load, tagging, total)
   -q, --quiet            Suppress progress output
   -h, --help             Show help
@@ -242,7 +242,7 @@ cli.py -> service.py -> model.py
 
 - `src/photoram/cli.py`: Click commands, progress, output and exit handling.
 - `src/photoram/service.py`: orchestration layer (collection, dispatch, post-processing).
-- `src/photoram/model.py`: RAM++ loading, checkpoint management, inference, safety checks.
+- `src/photoram/model.py`: ImageNet-21K model loading, preprocessing, inference, safety checks.
 - `src/photoram/schemas.py`: result schemas (`TagResult`, `BatchResult`).
 - `src/photoram/errors.py`: exception hierarchy and exit codes.
 - `src/photoram/metadata.py`: metadata writing adapters.

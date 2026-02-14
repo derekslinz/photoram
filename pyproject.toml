@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "photoram"
 version = "1.0.1"
-description = "Modern CLI photo tagger powered by RAM++ (Recognize Anything Model)"
+description = "Modern CLI photo classifier powered by ImageNet-21K"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [{ name = "lderek" }]
-keywords = ["image-tagging", "photo", "keywords", "RAM++", "deep-learning", "cli"]
+keywords = ["image-classification", "photo", "imagenet-21k", "deep-learning", "cli"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
@@ -23,14 +23,10 @@ dependencies = [
     "torch>=2.0",
     "torchvision>=0.15",
     "Pillow>=9.0",
-    "ram@git+https://github.com/xinyu1205/recognize-anything.git@7cb804a8609e9f4b1a50b7f31436d2df40bb9481",
     "huggingface-hub>=0.20",
     "rich>=13.0",
     "click>=8.0",
     "transformers>=4.30,<4.46",
-    "timm",
-    "scipy",
-    "fairscale",
 ]
 
 [project.optional-dependencies]

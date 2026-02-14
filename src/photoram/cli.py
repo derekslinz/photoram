@@ -1,4 +1,4 @@
-"""photoram-cli CLI — modern photo tagger powered by RAM++.
+"""photoram-cli CLI — modern photo classifier powered by ImageNet-21K.
 
 Exit codes:
     0 — success
@@ -107,7 +107,7 @@ def _validate_batch_size(ctx: click.Context, param: click.Parameter, value: int)
 @click.group(context_settings=_HELP_OPTION_NAMES)
 @click.version_option(__version__, prog_name="photoram-cli")
 def main() -> None:
-    """photoram-cli — Modern CLI photo tagger powered by RAM++."""
+    """photoram-cli — Modern CLI photo classifier powered by ImageNet-21K."""
 
 
 # ---------------------------------------------------------------------------
@@ -116,9 +116,9 @@ def main() -> None:
 
 @main.command(context_settings=_HELP_OPTION_NAMES)
 @click.argument("input_paths", nargs=-1, required=False, metavar="INPUT...")
-@click.option("-t", "--threshold", type=float, default=0.80, show_default=True,
+@click.option("-t", "--threshold", type=float, default=0.0, show_default=True,
               callback=_validate_threshold, expose_value=True, is_eager=True,
-              help="Detection threshold (0.0–1.0).")
+              help="Minimum class probability (0.0–1.0).")
 @click.option("-n", "--top-n", type=int, default=10,
               callback=_validate_top_n,
               help="Maximum number of tags to return.")
@@ -169,7 +169,7 @@ def tag(
     compat_output: Optional[str],
     compat_conf: bool,
 ) -> None:
-    """Tag one or more images using RAM++.
+    """Classify one or more images using ImageNet-21K.
 
     INPUT can be image files or directories.
 
@@ -219,12 +219,11 @@ def tag(
     # ---- Load model ----
     try:
         with (
-            console.status("Loading RAM++ model...", spinner=_SPINNER)
+            console.status("Loading ImageNet-21K model...", spinner=_SPINNER)
             if not quiet
             else _nullcontext()
         ):
-            # Suppress RAM model's stdout prints ("load checkpoint from...",
-            # "vit: swin_l") that would contaminate piped output.
+            # Suppress noisy library stdout that would contaminate piped output.
             with _suppress_stdout():
                 load_time = svc.load_model()
     except PhotoramError as e:
@@ -395,9 +394,8 @@ def _print_timings(
 def _suppress_stdout():
     """Redirect stdout to devnull to suppress noisy library prints.
 
-    The RAM package prints 'load checkpoint from ...' and 'vit: swin_l'
-    directly to stdout during model loading, which contaminates piped
-    JSON/CSV output.  This silences those prints.
+    Some third-party model loaders print directly to stdout during model
+    loading, which contaminates piped JSON/CSV output. This silences that.
     """
     old_fd = os.dup(1)
     try:
@@ -437,13 +435,8 @@ def info(device: Optional[str]) -> None:
     if hasattr(torch.backends, "mps"):
         console.print(f"  MPS available: {torch.backends.mps.is_available()}")
 
-    from .model import RAMPlusModel
-    console.print(f"  Default device: {RAMPlusModel._resolve_device(device)}")
-
-    from .model import CACHE_DIR, HF_FILENAME
-    ckpt = CACHE_DIR / HF_FILENAME
-    console.print(f"  Model cached: {ckpt.exists()}")
-    if ckpt.exists():
-        size_mb = ckpt.stat().st_size / (1024 * 1024)
-        console.print(f"  Model size: {size_mb:.0f} MB")
-        console.print(f"  Model path: {ckpt}")
+    from .model import HF_CACHE_DIR, HF_MODEL_ID, ImageNet21KModel
+    console.print(f"  Default device: {ImageNet21KModel._resolve_device(device)}")
+    console.print(f"  Model family: ImageNet-21K classifier")
+    console.print(f"  Model id: {HF_MODEL_ID}")
+    console.print(f"  HuggingFace cache: {HF_CACHE_DIR}")

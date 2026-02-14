@@ -1,14 +1,10 @@
 torch>=2.0
 torchvision>=0.15
 Pillow>=9.0
-ram @ git+https://github.com/xinyu1205/recognize-anything.git@7cb804a8609e9f4b1a50b7f31436d2df40bb9481
 huggingface-hub>=0.20
 rich>=13.0
 click>=8.0
 transformers<4.46,>=4.30
-timm
-scipy
-fairscale
 
 [all]
 pyexiv2>=2.8
