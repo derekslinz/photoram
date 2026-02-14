@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from pathlib import Path
 from typing import Any, Optional
@@ -16,7 +17,7 @@ from .schemas import TagResult
 # Constants
 # ---------------------------------------------------------------------------
 
-HF_MODEL_ID = os.environ.get("PHOTORAM_IMAGENET21K_MODEL", "google/vit-base-patch16-224-in21k")
+HF_MODEL_ID = os.environ.get("PHOTORAM_IMAGENET21K_MODEL", "vit_base_patch16_224.augreg_in21k")
 HF_CACHE_DIR = Path(os.environ.get(
     "HF_HOME",
     Path.home() / ".cache" / "huggingface",
@@ -41,7 +42,7 @@ Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 # ---------------------------------------------------------------------------
 
 class ImageNet21KModel:
-    """Wrapper around a Hugging Face ImageNet-21K classification model."""
+    """Wrapper around a TIMM ImageNet-21K classification model."""
 
     def __init__(
         self,
@@ -58,7 +59,7 @@ class ImageNet21KModel:
 
         self.device = self._resolve_device(device)
 
-        self._processor: Optional[Any] = None
+        self._transform: Optional[Any] = None
         self._model: Optional[Any] = None
         self._id2label: dict[int, str] = {}
 
@@ -89,38 +90,18 @@ class ImageNet21KModel:
     # ------------------------------------------------------------------
 
     @property
-    def processor(self) -> Any:
-        if self._processor is None:
-            try:
-                from transformers import AutoImageProcessor
-
-                try:
-                    self._processor = AutoImageProcessor.from_pretrained(
-                        self.model_id,
-                        use_fast=True,
-                    )
-                except TypeError:
-                    # Backward compatibility for older transformers versions.
-                    self._processor = AutoImageProcessor.from_pretrained(self.model_id)
-            except Exception as e:
-                raise ModelError(
-                    f"Failed to load ImageNet-21K image processor ({self.model_id}): {e}\n\n"
-                    "Remediation:\n"
-                    "  • Ensure internet access on first run\n"
-                    f"  • Clear model cache if corrupted: rm -rf {HF_CACHE_DIR}\n"
-                    "  • Override model id with PHOTORAM_IMAGENET21K_MODEL"
-                ) from e
-        return self._processor
-
-    @property
     def model(self) -> Any:
         if self._model is None:
             try:
-                from transformers import AutoModelForImageClassification
+                import timm
+                from timm.data import create_transform, resolve_model_data_config
 
-                self._model = AutoModelForImageClassification.from_pretrained(self.model_id)
+                self._model = timm.create_model(self.model_id, pretrained=True)
                 self._model.eval()
                 self._model = self._model.to(self.device)
+
+                data_cfg = resolve_model_data_config(self._model)
+                self._transform = create_transform(**data_cfg, is_training=False)
                 self._id2label = self._extract_id2label(self._model)
             except Exception as e:
                 raise ModelError(
@@ -132,27 +113,78 @@ class ImageNet21KModel:
                 ) from e
         return self._model
 
+    @property
+    def transform(self) -> Any:
+        if self._transform is None:
+            _ = self.model
+        return self._transform
+
+    @staticmethod
+    def _normalize_label(label: str) -> str:
+        cleaned = label.strip().replace("_", " ")
+        if "," in cleaned:
+            cleaned = cleaned.split(",", 1)[0].strip()
+        return cleaned
+
+    @staticmethod
+    def _is_placeholder_label(label: str) -> bool:
+        return bool(re.fullmatch(r"label[\s_\-]*\d+", label.strip().lower()))
+
     @staticmethod
     def _extract_id2label(model: Any) -> dict[int, str]:
+        # Preferred path: use TIMM ImageNet metadata that includes 21K labels.
+        try:
+            from timm.data.imagenet_info import ImageNetInfo, infer_imagenet_subset
+
+            subset = infer_imagenet_subset(model)
+            if subset:
+                info = ImageNetInfo(subset=subset)
+                num_classes = int(getattr(model, "num_classes", 0) or info.num_classes())
+                labels: dict[int, str] = {}
+                shared = min(num_classes, info.num_classes())
+
+                for idx in range(shared):
+                    desc = str(info.index_to_description(idx))
+                    normalized = ImageNet21KModel._normalize_label(desc)
+                    labels[idx] = normalized if normalized else f"class_{idx}"
+
+                for idx in range(shared, num_classes):
+                    labels[idx] = f"class_{idx}"
+
+                if labels:
+                    return labels
+        except Exception:
+            pass
+
+        # Fallback path for non-TIMM models.
         raw = getattr(getattr(model, "config", object()), "id2label", None) or {}
 
         id2label: dict[int, str] = {}
+        placeholder_count = 0
         for key, value in raw.items():
             try:
                 idx = int(key)
             except (TypeError, ValueError):
                 continue
 
-            label = str(value).strip()
-            if not label:
-                label = f"class_{idx}"
-            id2label[idx] = label.replace("_", " ")
+            normalized = ImageNet21KModel._normalize_label(str(value))
+            if not normalized:
+                normalized = f"class_{idx}"
+            if ImageNet21KModel._is_placeholder_label(normalized):
+                placeholder_count += 1
+                normalized = f"class_{idx}"
+            id2label[idx] = normalized
 
-        if id2label:
+        if id2label and placeholder_count < len(id2label):
             return id2label
 
-        num_labels = int(getattr(getattr(model, "config", object()), "num_labels", 0) or 0)
-        return {i: f"class_{i}" for i in range(max(0, num_labels))}
+        num_classes = int(
+            getattr(model, "num_classes", 0)
+            or getattr(getattr(model, "config", object()), "num_labels", 0)
+            or len(id2label)
+            or 0
+        )
+        return {i: id2label.get(i, f"class_{i}") for i in range(max(0, num_classes))}
 
     # ------------------------------------------------------------------
     # Image decoding helpers
@@ -284,17 +316,15 @@ class ImageNet21KModel:
         """Batch inference returning top labels and probabilities for each image."""
         import torch
 
-        processor = self.processor
         model = self.model
+        transform = self.transform
 
-        encoded_inputs = processor(images=images, return_tensors="pt")
-        inputs = {
-            key: value.to(self.device) if hasattr(value, "to") else value
-            for key, value in encoded_inputs.items()
-        }
+        pixel_values = [transform(image) for image in images]
+        inputs = torch.stack(pixel_values).to(self.device)
 
         with torch.no_grad():
-            logits = model(**inputs).logits
+            outputs = model(inputs)
+            logits = outputs.logits if hasattr(outputs, "logits") else outputs
             probs = torch.softmax(logits, dim=-1)
 
         num_classes = int(probs.shape[-1])

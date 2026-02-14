@@ -80,6 +80,13 @@ def test_batch_inference_applies_top_k_and_threshold(monkeypatch: pytest.MonkeyP
         def __exit__(self, *_args):
             return False
 
+    class _Stacked:
+        def __init__(self, values):
+            self.values = values
+
+        def to(self, _device):
+            return self
+
     def _softmax(tensor: _Tensor, dim: int = -1) -> _Tensor:
         assert dim == -1
         rows = []
@@ -103,6 +110,7 @@ def test_batch_inference_applies_top_k_and_threshold(monkeypatch: pytest.MonkeyP
         no_grad=lambda: _NoGrad(),
         softmax=_softmax,
         topk=_topk,
+        stack=lambda values: _Stacked(values),
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
@@ -116,7 +124,7 @@ def test_batch_inference_applies_top_k_and_threshold(monkeypatch: pytest.MonkeyP
             return {"pixel_values": _DeviceValue()}
 
     class _FakeClassifier:
-        def __call__(self, **kwargs):
+        def __call__(self, *_args, **_kwargs):
             # 1 image x 4 classes
             logits = _Tensor([[5.0, 4.0, 0.0, -1.0]])
             return types.SimpleNamespace(logits=logits)
@@ -125,7 +133,7 @@ def test_batch_inference_applies_top_k_and_threshold(monkeypatch: pytest.MonkeyP
     model.device = "cpu"
     model.top_k = 3
     model.threshold = 0.03
-    model._processor = _FakeProcessor()
+    model._transform = lambda _image: object()
     model._model = _FakeClassifier()
     model._id2label = {
         0: "alpha",

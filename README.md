@@ -14,7 +14,7 @@
 
 ## Security Hardening
 
-- Deterministic model selection: pinned default model id (`google/vit-base-patch16-224-in21k`).
+- Deterministic model selection: pinned default model id (`vit_base_patch16_224.augreg_in21k`).
 - Image safety checks: decompression-bomb protection is enabled (`PHOTORAM_MAX_IMAGE_PIXELS`, default `120000000`).
 - Metadata subprocess hardening: exiftool invocation uses `--` before image path to prevent option parsing.
 - Streaming batch loader: avoids preloading all tensors for large jobs.
