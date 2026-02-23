@@ -175,6 +175,10 @@ local function run_photoram(images)
   if threshold_pct > 100 then threshold_pct = 100 end
   local batch_size = pref_int("batch_size", 32, 1)
   local write_metadata = pref_bool("write_metadata", false)
+  local quiet = pref_bool("quiet_output", true)
+  local timings = pref_bool("show_timings", false)
+  local device = trim(pref_string("device", ""))
+  local overrides_path = trim(pref_string("overrides_path", ""))
 
   local threshold = threshold_pct / 100.0
 
@@ -189,15 +193,32 @@ local function run_photoram(images)
   local cmd_parts = {
     shell_quote(executable),
     "tag",
-    "--quiet",
     "--format", "text",
     "--top-n", tostring(max_tags),
     "--threshold", string.format("%.2f", threshold),
     "--batch-size", tostring(batch_size),
   }
 
+  if quiet then
+    table.insert(cmd_parts, "--quiet")
+  end
+
   if write_metadata then
     table.insert(cmd_parts, "--write-metadata")
+  end
+
+  if timings then
+    table.insert(cmd_parts, "--timings")
+  end
+
+  if device ~= "" then
+    table.insert(cmd_parts, "--device")
+    table.insert(cmd_parts, shell_quote(device))
+  end
+
+  if overrides_path ~= "" then
+    table.insert(cmd_parts, "--overrides")
+    table.insert(cmd_parts, shell_quote(overrides_path))
   end
 
   for _, path in ipairs(selected_paths) do
@@ -290,8 +311,32 @@ local function install_lib_module()
     end,
   }
 
+  local threshold_slider = dt.new_widget("slider") {
+    label = _("threshold (%)"),
+    min = 0,
+    max = 100,
+    step = 1,
+    value = pref_int("threshold_percent", 80, 0),
+    changed_callback = function(self)
+      dt.preferences.write(MODULE, "threshold_percent", "integer", math.floor(self.value))
+    end,
+  }
+
+  local max_tags_slider = dt.new_widget("slider") {
+    label = _("max tags"),
+    min = 1,
+    max = 50,
+    step = 1,
+    value = pref_int("max_tags", 10, 1),
+    changed_callback = function(self)
+      dt.preferences.write(MODULE, "max_tags", "integer", math.floor(self.value))
+    end,
+  }
+
   local container = dt.new_widget("box") {
     orientation = "vertical",
+    threshold_slider,
+    max_tags_slider,
     run_btn,
     UI.status,
   }
@@ -461,6 +506,38 @@ safe_register_pref(
   _("photoram: write metadata"),
   _("Also write predicted tags to image metadata via photoram-cli."),
   false
+)
+
+safe_register_pref(
+  "quiet_output",
+  "bool",
+  _("photoram: quiet output"),
+  _("Pass --quiet to photoram-cli to suppress progress/status output."),
+  true
+)
+
+safe_register_pref(
+  "show_timings",
+  "bool",
+  _("photoram: show timings"),
+  _("Pass --timings to photoram-cli to print timing summary to logs."),
+  false
+)
+
+safe_register_pref(
+  "device",
+  "string",
+  _("photoram: device"),
+  _("Optional --device value (cpu, cuda, mps). Leave empty for auto."),
+  ""
+)
+
+safe_register_pref(
+  "overrides_path",
+  "string",
+  _("photoram: overrides file"),
+  _("Optional path for --overrides JSON file."),
+  ""
 )
 
 install_or_schedule_panel()

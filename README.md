@@ -139,11 +139,15 @@ What it does:
 
 - Works on all selected images in one action (not single-image only).
 - Exposes tunable parameters in darktable preferences:
+- `photoram: executable` -> command/path to `photoram-cli`
 - `photoram: max tags` -> `--top-n`
 - `photoram: threshold (%)` -> `--threshold`
 - `photoram: batch size` -> `--batch-size`
 - `photoram: write metadata` -> `--write-metadata`
-- `photoram: executable` -> command/path to `photoram-cli`
+- `photoram: quiet output` -> `--quiet`
+- `photoram: show timings` -> `--timings`
+- `photoram: device` -> `--device`
+- `photoram: overrides file` -> `--overrides`
 
 Install:
 

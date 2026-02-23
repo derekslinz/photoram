@@ -29,3 +29,7 @@ Thumbs.db
 # Test artifacts
 test_*.jpg
 test_*.png
+src/photoram.egg-info/PKG-INFO
+words.txt
+src/photoram.egg-info/requires.txt
+src/photoram.egg-info/PKG-INFO

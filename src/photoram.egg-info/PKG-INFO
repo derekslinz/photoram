@@ -18,7 +18,7 @@ Requires-Dist: Pillow>=9.0
 Requires-Dist: huggingface-hub>=0.20
 Requires-Dist: rich>=13.0
 Requires-Dist: click>=8.0
-Requires-Dist: transformers<4.46,>=4.30
+Requires-Dist: timm>=1.0
 Provides-Extra: metadata
 Requires-Dist: pyexiv2>=2.8; extra == "metadata"
 Provides-Extra: dev
@@ -45,7 +45,7 @@ Requires-Dist: pyexiv2>=2.8; extra == "all"
 
 ## Security Hardening
 
-- Deterministic model selection: pinned default model id (`google/vit-base-patch16-224-in21k`).
+- Deterministic model selection: pinned default model id (`vit_base_patch16_224.augreg_in21k`).
 - Image safety checks: decompression-bomb protection is enabled (`PHOTORAM_MAX_IMAGE_PIXELS`, default `120000000`).
 - Metadata subprocess hardening: exiftool invocation uses `--` before image path to prevent option parsing.
 - Streaming batch loader: avoids preloading all tensors for large jobs.
