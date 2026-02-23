@@ -145,7 +145,6 @@ local function execute_command(command)
 end
 
 local UI = {
-  ---@type { label: string } | nil
   status = nil,
 }
 
@@ -318,11 +317,8 @@ local function install_lib_module()
 
   local threshold_slider = dt.new_widget("slider") {
     label = _("threshold (%)"),
-    hard_min = 0,
-    hard_max = 100,
-    soft_min = 0,
-    soft_max = 100,
-    digits = 0,
+    min = 0,
+    max = 100,
     step = 1,
     value = pref_int("threshold_percent", 80, 0),
     changed_callback = function(self)
@@ -332,11 +328,8 @@ local function install_lib_module()
 
   local max_tags_slider = dt.new_widget("slider") {
     label = _("max tags"),
-    hard_min = 1,
-    hard_max = 50,
-    soft_min = 1,
-    soft_max = 50,
-    digits = 0,
+    min = 1,
+    max = 50,
     step = 1,
     value = pref_int("max_tags", 10, 1),
     changed_callback = function(self)
@@ -353,8 +346,8 @@ local function install_lib_module()
   }
 
   local plugin_display_views = {
-    [dt.gui.views.lighttable] = { "DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100 },
-    [dt.gui.views.darkroom] = { "DT_UI_CONTAINER_PANEL_LEFT_CENTER", 100 },
+    [dt.gui.views.lighttable] = { "panel_right_center", 100 },
+    [dt.gui.views.darkroom] = { "panel_left_center", 100 },
   }
 
   local ok, err = pcall(function()
@@ -443,7 +436,7 @@ local function install_or_schedule_panel()
   end
 
   local current_view = dt.gui.current_view()
-  if current_view and (current_view.id == "lighttable" or current_view.name == "lighttable") then
+  if current_view and current_view.name == "lighttable" then
     install_lib_module()
     return
   end
@@ -453,7 +446,7 @@ local function install_or_schedule_panel()
       MODULE,
       "view-changed",
       function(event, old_view, new_view)
-        if new_view and (new_view.id == "lighttable" or new_view.name == "lighttable") then
+        if new_view and new_view.name == "lighttable" then
           install_lib_module()
         end
       end
@@ -562,16 +555,6 @@ safe_register_pref(
 
 install_or_schedule_panel()
 
-local function show()
-  if STATE.lib_registered and dt.gui and dt.gui.libs and dt.gui.libs[MODULE] then
-    dt.gui.libs[MODULE].visible = true
-  end
-end
-
-local function restart()
-  show()
-end
-
 local script_data = {}
 script_data.metadata = {
   name = _("photoram"),
@@ -580,8 +563,6 @@ script_data.metadata = {
   help = "https://github.com/lderek/photoram",
 }
 script_data.destroy = destroy
-script_data.restart = restart
-script_data.show = show
 script_data.destroy_method = "hide"
 
 return script_data
