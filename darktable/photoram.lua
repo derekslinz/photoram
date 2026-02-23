@@ -226,8 +226,8 @@ local function run_photoram(images)
   end
 
   local command = table.concat(cmd_parts, " ")
-    .. " > " .. shell_quote(tmp_out)
-    .. " 2> " .. shell_quote(tmp_err)
+      .. " > " .. shell_quote(tmp_out)
+      .. " 2> " .. shell_quote(tmp_err)
 
   local ret = execute_command(command)
   if ret ~= 0 then
@@ -300,6 +300,10 @@ local function install_lib_module()
     return
   end
 
+  if not (dt.gui and dt.gui.views) then
+    return
+  end
+
   UI.status = dt.new_widget("label") {
     label = _("ready"),
   }
@@ -342,8 +346,8 @@ local function install_lib_module()
   }
 
   local plugin_display_views = {
-    [dt.gui.views.lighttable] = {"DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100},
-    [dt.gui.views.darkroom] = {"DT_UI_CONTAINER_PANEL_LEFT_CENTER", 100},
+    [dt.gui.views.lighttable] = { "DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100 },
+    [dt.gui.views.darkroom] = { "DT_UI_CONTAINER_PANEL_LEFT_CENTER", 100 },
   }
 
   local ok, err = pcall(function()
@@ -427,13 +431,12 @@ if not ok_shortcut then
 end
 
 local function install_or_schedule_panel()
-  if not (dt.gui and dt.gui.current_view) then
-    install_lib_module()
+  if not dt.gui then
     return
   end
 
   local current_view = dt.gui.current_view()
-  if current_view and current_view.id == "lighttable" then
+  if current_view and current_view.name == "lighttable" then
     install_lib_module()
     return
   end
@@ -459,9 +462,13 @@ local function install_or_schedule_panel()
 end
 
 -- Preferences
-local function safe_register_pref(name, pref_type, label, tooltip, default)
+local function safe_register_pref(name, pref_type, label, tooltip, default, min, max)
   local ok, err = pcall(function()
-    dt.preferences.register(MODULE, name, pref_type, label, tooltip, default)
+    if pref_type == "integer" then
+      dt.preferences.register(MODULE, name, pref_type, label, tooltip, default, min, max)
+    else
+      dt.preferences.register(MODULE, name, pref_type, label, tooltip, default)
+    end
   end)
   if not ok then
     dt.print_log("photoram preference registration error (" .. name .. "): " .. tostring(err))
@@ -481,7 +488,9 @@ safe_register_pref(
   "integer",
   _("photoram: max tags"),
   _("Maximum number of tags per image (--top-n)."),
-  10
+  10,
+  1,
+  50
 )
 
 safe_register_pref(
@@ -489,7 +498,9 @@ safe_register_pref(
   "integer",
   _("photoram: threshold (%)"),
   _("Confidence threshold in percent (maps to --threshold)."),
-  80
+  80,
+  0,
+  100
 )
 
 safe_register_pref(
@@ -497,7 +508,9 @@ safe_register_pref(
   "integer",
   _("photoram: batch size"),
   _("Images processed per inference batch (--batch-size)."),
-  32
+  32,
+  1,
+  1000
 )
 
 safe_register_pref(
