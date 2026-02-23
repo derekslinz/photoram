@@ -145,6 +145,7 @@ local function execute_command(command)
 end
 
 local UI = {
+  ---@type { label: string } | nil
   status = nil,
 }
 
