@@ -145,7 +145,10 @@ local function execute_command(command)
 end
 
 local UI = {
+  ---@type { label: string } | nil
   status = nil,
+  threshold_slider = nil,
+  max_tags_slider = nil,
 }
 
 local STATE = {
@@ -308,46 +311,52 @@ local function install_lib_module()
     label = _("ready"),
   }
 
+  UI.threshold_slider = dt.new_widget("slider") {
+    label = _("threshold (%)"),
+    hard_min = 0,
+    hard_max = 100,
+    soft_min = 0,
+    soft_max = 100,
+    digits = 0,
+    step = 1,
+    value = pref_int("threshold_percent", 80, 0),
+  }
+
+  UI.max_tags_slider = dt.new_widget("slider") {
+    label = _("max tags"),
+    hard_min = 1,
+    hard_max = 50,
+    soft_min = 1,
+    soft_max = 50,
+    digits = 0,
+    step = 1,
+    value = pref_int("max_tags", 10, 1),
+  }
+
   local run_btn = dt.new_widget("button") {
     label = _("auto-tag selected"),
     clicked_callback = function()
+      if UI.threshold_slider then
+        dt.preferences.write(MODULE, "threshold_percent", "integer", math.floor(UI.threshold_slider.value))
+      end
+      if UI.max_tags_slider then
+        dt.preferences.write(MODULE, "max_tags", "integer", math.floor(UI.max_tags_slider.value))
+      end
       run_photoram(resolve_images(nil))
-    end,
-  }
-
-  local threshold_slider = dt.new_widget("slider") {
-    label = _("threshold (%)"),
-    min = 0,
-    max = 100,
-    step = 1,
-    value = pref_int("threshold_percent", 80, 0),
-    changed_callback = function(self)
-      dt.preferences.write(MODULE, "threshold_percent", "integer", math.floor(self.value))
-    end,
-  }
-
-  local max_tags_slider = dt.new_widget("slider") {
-    label = _("max tags"),
-    min = 1,
-    max = 50,
-    step = 1,
-    value = pref_int("max_tags", 10, 1),
-    changed_callback = function(self)
-      dt.preferences.write(MODULE, "max_tags", "integer", math.floor(self.value))
     end,
   }
 
   local container = dt.new_widget("box") {
     orientation = "vertical",
-    threshold_slider,
-    max_tags_slider,
+    UI.threshold_slider,
+    UI.max_tags_slider,
     run_btn,
     UI.status,
   }
 
   local plugin_display_views = {
-    [dt.gui.views.lighttable] = { "panel_right_center", 100 },
-    [dt.gui.views.darkroom] = { "panel_left_center", 100 },
+    [dt.gui.views.lighttable] = { "DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100 },
+    [dt.gui.views.darkroom] = { "DT_UI_CONTAINER_PANEL_LEFT_CENTER", 100 },
   }
 
   local ok, err = pcall(function()
@@ -436,7 +445,7 @@ local function install_or_schedule_panel()
   end
 
   local current_view = dt.gui.current_view()
-  if current_view and current_view.name == "lighttable" then
+  if current_view and (current_view.id == "lighttable" or current_view.name == "lighttable") then
     install_lib_module()
     return
   end
@@ -446,7 +455,7 @@ local function install_or_schedule_panel()
       MODULE,
       "view-changed",
       function(event, old_view, new_view)
-        if new_view and new_view.name == "lighttable" then
+        if new_view and (new_view.id == "lighttable" or new_view.name == "lighttable") then
           install_lib_module()
         end
       end
@@ -555,6 +564,16 @@ safe_register_pref(
 
 install_or_schedule_panel()
 
+local function show()
+  if STATE.lib_registered and dt.gui and dt.gui.libs and dt.gui.libs[MODULE] then
+    dt.gui.libs[MODULE].visible = true
+  end
+end
+
+local function restart()
+  show()
+end
+
 local script_data = {}
 script_data.metadata = {
   name = _("photoram"),
@@ -563,6 +582,8 @@ script_data.metadata = {
   help = "https://github.com/lderek/photoram",
 }
 script_data.destroy = destroy
+script_data.restart = restart
+script_data.show = show
 script_data.destroy_method = "hide"
 
 return script_data
